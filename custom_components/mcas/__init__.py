@@ -4,14 +4,6 @@ from __future__ import annotations
 from pathlib import Path
 import traceback
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
-from .api import MCASClient
-from .const import CONF_CHILDREN, CONF_PASSWORD, CONF_USERNAME, DOMAIN, PLATFORMS
-from .coordinator import MCASDataUpdateCoordinator
-
 _DEBUG = Path("/config/mcas-startup-debug.txt")
 
 
@@ -21,6 +13,23 @@ def _debug(message: str) -> None:
             handle.write(message + "\n")
     except OSError:
         pass
+
+
+_debug("0 module import started")
+
+try:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    from .api import MCASClient
+    from .const import CONF_CHILDREN, CONF_PASSWORD, CONF_USERNAME, DOMAIN, PLATFORMS
+    from .coordinator import MCASDataUpdateCoordinator
+    _debug("0a imports passed")
+except Exception as err:
+    _debug(f"IMPORT ERROR {type(err).__name__}: {err}")
+    _debug(traceback.format_exc())
+    raise
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
