@@ -11,6 +11,10 @@ from aiohttp import ClientResponseError, ClientSession
 from .const import (
     ACADEMIC_CALENDAR_PATH,
     API_BASE,
+    APPLICATION_ID,
+    APPLICATION_SECRET,
+    DISCOVERY_BASE,
+    SCHOOL_CONTACT_PATH,
     TIMETABLE_PATH,
     TOKEN_PATH,
     USER_AGENT,
@@ -26,6 +30,12 @@ class MCASAuthError(MCASApiError):
     """Raised when MCAS authentication fails."""
 
 
+@dataclass(slots=True, frozen=True)
+class MCASSchoolContact:
+    school_id: str
+    contact_id: str
+
+
 @dataclass(slots=True)
 class MCASToken:
     access_token: str
@@ -34,7 +44,7 @@ class MCASToken:
 
 
 class MCASClient:
-    """Minimal client for the read-only MCAS endpoints observed in browser traffic."""
+    """Client for the read-only MCAS endpoints observed in official client traffic."""
 
     def __init__(
         self,
@@ -44,30 +54,63 @@ class MCASClient:
         contact_id: str,
         username: str,
         password: str,
-        application_id: str,
-        application_secret: str,
     ) -> None:
         self._session = session
         self.school_id = str(school_id)
         self.contact_id = str(contact_id)
         self.username = username
         self.password = password
-        self.application_id = application_id
-        self.application_secret = application_secret
         self._token: MCASToken | None = None
 
+    @staticmethod
+    async def async_discover_school_contacts(
+        session: ClientSession, email: str
+    ) -> list[MCASSchoolContact]:
+        """Resolve MCAS school/contact pairs for a parent email address."""
+        payload = {
+            "ApplicationId": APPLICATION_ID,
+            "ApplicationSecret": APPLICATION_SECRET,
+            "ApiSource": "app",
+            "Email": email,
+        }
+        try:
+            async with session.post(
+                f"{DISCOVERY_BASE}{SCHOOL_CONTACT_PATH}",
+                json=payload,
+                headers={"User-Agent": USER_AGENT},
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+        except ClientResponseError as err:
+            raise MCASApiError(
+                f"MCAS school discovery failed: {err.status}"
+            ) from err
+
+        contacts: list[MCASSchoolContact] = []
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                school_id = item.get("SchoolID")
+                contact_id = item.get("ContactID")
+                if school_id and contact_id:
+                    contacts.append(
+                        MCASSchoolContact(str(school_id), str(contact_id))
+                    )
+        return contacts
+
     async def authenticate(self) -> MCASToken:
-        """Authenticate using the same form-style token exchange used by MCAS."""
+        """Authenticate with parent credentials over TLS."""
         payload = {
             "schoolid": self.school_id,
             "username": self.username,
             "password": self.password,
             "grant_type": "password",
-            "apiSource": "mcas",
-            "userType": "parent",
-            "application_id": self.application_id,
-            "application_secret": self.application_secret,
-            "ipAddress": "",
+            "apiSource": "app",
+            "userType": "mcas",
+            "application_id": APPLICATION_ID,
+            "application_secret": APPLICATION_SECRET,
+            "ipAddress": "127.0.0.1",
             "mcasParentLoginFromMIS": "false",
             "isPasswordHash": "false",
         }
