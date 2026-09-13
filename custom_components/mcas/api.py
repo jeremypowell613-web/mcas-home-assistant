@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -108,11 +106,41 @@ class MCASClient:
                 contacts[pair] = MCASSchoolContact(*pair)
         return list(contacts.values())
 
+    async def async_get_hashed_password(self) -> str:
+        """Ask the official MCAS hashing endpoint to transform the parent password."""
+        payload = {
+            "ApplicationId": APPLICATION_ID,
+            "ApplicationSecret": APPLICATION_SECRET,
+            "ApiSource": "app",
+            "Password": self.password,
+        }
+        try:
+            async with self._session.post(
+                f"{DISCOVERY_BASE}/api/v1/mcas/user/hashpasswordV2",
+                json=payload,
+                headers={"User-Agent": USER_AGENT},
+            ) as response:
+                if response.status in (400, 401, 403):
+                    raise MCASAuthError("MCAS rejected the supplied credentials")
+                response.raise_for_status()
+                try:
+                    data = await response.json()
+                except (ValueError, TypeError):
+                    data = (await response.text()).strip().strip('"')
+        except ClientResponseError as err:
+            raise MCASApiError(f"MCAS password hashing failed: {err.status}") from err
+
+        if isinstance(data, str):
+            hashed_password = data.strip().strip('"')
+        else:
+            hashed_password = str(data or "").strip().strip('"')
+        if not hashed_password:
+            raise MCASApiError("MCAS password hashing returned an empty value")
+        return hashed_password
+
     async def authenticate(self) -> MCASToken:
-        """Authenticate using the password transform used by the official MCAS client."""
-        password_hash = base64.b64encode(
-            hashlib.sha256(self.password.encode("utf-8")).digest()
-        ).decode("ascii")
+        """Authenticate using the same server-side password transform as the official MCAS app."""
+        password_hash = await self.async_get_hashed_password()
         payload = {
             "schoolid": self.school_id,
             "username": self.username,
