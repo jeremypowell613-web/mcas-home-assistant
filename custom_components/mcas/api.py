@@ -45,6 +45,17 @@ class MCASToken:
     school_scope: Any | None = None
 
 
+def _walk_dicts(value: Any):
+    """Yield every mapping contained in an arbitrary JSON-compatible value."""
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_dicts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_dicts(child)
+
+
 class MCASClient:
     """Client for the read-only MCAS endpoints observed in official client traffic."""
 
@@ -88,18 +99,14 @@ class MCASClient:
                 f"MCAS school discovery failed: {err.status}"
             ) from err
 
-        contacts: list[MCASSchoolContact] = []
-        if isinstance(data, dict):
-            data = data.get("Table") or data.get("Data") or data.get("data") or []
-        if isinstance(data, list):
-            for item in data:
-                if not isinstance(item, dict):
-                    continue
-                school_id = item.get("SchoolID") or item.get("schoolID") or item.get("schoolId")
-                contact_id = item.get("ContactID") or item.get("contactID") or item.get("contactId")
-                if school_id and contact_id:
-                    contacts.append(MCASSchoolContact(str(school_id), str(contact_id)))
-        return contacts
+        contacts: dict[tuple[str, str], MCASSchoolContact] = {}
+        for item in _walk_dicts(data):
+            school_id = item.get("SchoolID") or item.get("schoolID") or item.get("schoolId")
+            contact_id = item.get("ContactID") or item.get("contactID") or item.get("contactId")
+            if school_id and contact_id:
+                pair = (str(school_id), str(contact_id))
+                contacts[pair] = MCASSchoolContact(*pair)
+        return list(contacts.values())
 
     async def authenticate(self) -> MCASToken:
         """Authenticate using the password transform used by the official MCAS client."""
@@ -174,14 +181,21 @@ class MCASClient:
             USER_LIST_PATH,
             params={"includeStudentPhotosData": str(include_photos).lower()},
         )
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict):
-            for key in ("Table", "Users", "Students", "Data", "data"):
-                value = data.get(key)
-                if isinstance(value, list):
-                    return value
-        return []
+        records: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for item in _walk_dicts(data):
+            if item.get("StudentID") or item.get("studentID") or item.get("studentId"):
+                marker = id(item)
+                if marker not in seen:
+                    seen.add(marker)
+                    records.append(item)
+            students = item.get("Students") or item.get("students")
+            if isinstance(students, list):
+                marker = id(item)
+                if marker not in seen:
+                    seen.add(marker)
+                    records.append(item)
+        return records
 
     async def async_get_timetable(
         self, student_id: str, week_start: date
