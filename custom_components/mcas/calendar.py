@@ -29,9 +29,20 @@ async def async_setup_entry(
             [
                 MCASTimetableCalendar(coordinator, entry, child_key, profile),
                 MCASAcademicCalendar(coordinator, entry, child_key, profile),
+                MCASHomeworkCalendar(coordinator, entry, child_key, profile),
             ]
         )
     async_add_entities(entities)
+
+
+def _homework_rows(data: dict[str, Any], child_key: str) -> list[dict[str, Any]]:
+    rows = (
+        data.get("children", {})
+        .get(child_key, {})
+        .get("homework", {})
+        .get("Table", [])
+    )
+    return rows if isinstance(rows, list) else []
 
 
 class MCASCalendarBase(CoordinatorEntity[MCASDataUpdateCoordinator], CalendarEntity):
@@ -97,11 +108,7 @@ class MCASTimetableCalendar(MCASCalendarBase):
         start_date: datetime,
         end_date: datetime,
     ) -> list[CalendarEvent]:
-        return [
-            event
-            for event in self._events()
-            if event.end > start_date and event.start < end_date
-        ]
+        return [event for event in self._events() if event.end > start_date and event.start < end_date]
 
 
 class MCASAcademicCalendar(MCASCalendarBase):
@@ -149,8 +156,54 @@ class MCASAcademicCalendar(MCASCalendarBase):
     ) -> list[CalendarEvent]:
         start_day = start_date.date()
         end_day = end_date.date()
-        return [
-            event
-            for event in self._events()
-            if event.end > start_day and event.start < end_day
-        ]
+        return [event for event in self._events() if event.end > start_day and event.start < end_day]
+
+
+class MCASHomeworkCalendar(MCASCalendarBase):
+    _attr_name = "Homework"
+    _attr_icon = "mdi:book-education"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "homework_calendar")
+
+    def _events(self) -> list[CalendarEvent]:
+        events: list[CalendarEvent] = []
+        for item in _homework_rows(self.coordinator.data, self.child_key):
+            due = parse_local_datetime(item.get("DueDate"))
+            if due is None:
+                continue
+            start = parse_local_datetime(item.get("AvailableFrom")) or due - timedelta(hours=1)
+            title = str(item.get("HomeworkTitle") or "Homework")
+            description_bits = []
+            if item.get("Subject"):
+                description_bits.append(f"Subject: {item['Subject']}")
+            if item.get("CollectionDescription"):
+                description_bits.append(f"Class: {item['CollectionDescription']}")
+            if item.get("AssignedBy"):
+                description_bits.append(f"Assigned by: {item['AssignedBy']}")
+            if item.get("HomeworkDescription"):
+                description_bits.append(str(item["HomeworkDescription"]))
+            events.append(
+                CalendarEvent(
+                    start=start,
+                    end=due,
+                    summary=title,
+                    description="\n".join(description_bits) or None,
+                )
+            )
+        events.sort(key=lambda event: event.end)
+        return events
+
+    @property
+    def event(self) -> CalendarEvent | None:
+        now = dt_util.now()
+        upcoming = [event for event in self._events() if event.end >= now]
+        return min(upcoming, key=lambda item: item.end) if upcoming else None
+
+    async def async_get_events(
+        self,
+        hass: HomeAssistant,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[CalendarEvent]:
+        return [event for event in self._events() if event.end > start_date and event.start < end_date]
