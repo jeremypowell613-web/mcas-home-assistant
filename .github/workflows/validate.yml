@@ -1,0 +1,22 @@
+name: Validate
+
+on:
+  push:
+    branches: [main, feature/**]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile Python
+        run: python -m compileall custom_components
+      - name: Validate JSON
+        run: |
+          python -m json.tool custom_components/mcas/manifest.json >/dev/null
+          python -m json.tool custom_components/mcas/strings.json >/dev/null
+          python -m json.tool custom_components/mcas/translations/en.json >/dev/null

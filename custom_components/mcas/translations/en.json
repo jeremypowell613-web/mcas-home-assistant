@@ -1,0 +1,25 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect MyChildAtSchool",
+        "description": "Enter your MCAS parent login details and the application metadata discovered from the official MCAS web client.",
+        "data": {
+          "username": "Parent email / username",
+          "password": "Password",
+          "school_id": "School ID",
+          "contact_id": "Contact ID",
+          "application_id": "Application ID",
+          "application_secret": "Application secret"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "MCAS rejected the supplied credentials.",
+      "cannot_connect": "Unable to connect to MCAS."
+    },
+    "abort": {
+      "already_configured": "This MCAS account is already configured."
+    }
+  }
+}
