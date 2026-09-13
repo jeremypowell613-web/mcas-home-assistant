@@ -25,7 +25,6 @@ def _child_key(child: dict[str, Any]) -> str:
 
 
 def _merge_timetables(*payloads: Any) -> dict[str, Any]:
-    """Merge MCAS timetable responses without exposing duplicate lessons."""
     lessons: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for payload in payloads:
@@ -49,6 +48,32 @@ def _merge_timetables(*payloads: Any) -> dict[str, Any]:
             lessons.append(lesson)
     lessons.sort(key=lambda item: str(item.get("StartDate") or ""))
     return {"Table": lessons}
+
+
+def _current_year_id(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for table_name in ("Table1", "Table"):
+        rows = payload.get(table_name, [])
+        if isinstance(rows, list) and rows:
+            value = rows[0].get("YearID") if isinstance(rows[0], dict) else None
+            if value is not None:
+                return str(value)
+    return None
+
+
+async def _optional(label: str, awaitable) -> dict[str, Any]:
+    try:
+        value = await awaitable
+        return value if isinstance(value, dict) else {}
+    except Exception as err:
+        _LOGGER.warning(
+            "MCAS optional %s unavailable (%s, status=%s)",
+            label,
+            type(err).__name__,
+            getattr(err, "status", "n/a"),
+        )
+        return {}
 
 
 class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -95,25 +120,42 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 student_id = str(child["student_id"])
                 current_payload = await client.async_get_timetable(student_id, this_week)
+                next_payload = await _optional(
+                    "next-week timetable",
+                    client.async_get_timetable(student_id, next_week),
+                )
 
-                # The future-week endpoint is useful for weekend/Friday look-ahead,
-                # but some MCAS tenants reject future-week requests. It must never
-                # prevent the whole config entry (and calendars/school-day entities)
-                # from loading.
-                next_payload: dict[str, Any] = {}
-                try:
-                    next_payload = await client.async_get_timetable(student_id, next_week)
-                except Exception as err:  # optional enhancement only
-                    _LOGGER.warning(
-                        "MCAS next-week timetable unavailable (%s, status=%s); continuing with current week",
-                        type(err).__name__,
-                        getattr(err, "status", "n/a"),
+                years = await _optional("school years", client.async_get_years(student_id))
+                year_id = _current_year_id(years)
+
+                attendance: dict[str, Any] = {}
+                behaviour: dict[str, Any] = {}
+                behaviour_chronological: dict[str, Any] = {}
+                if year_id:
+                    attendance = await _optional(
+                        "attendance", client.async_get_attendance(student_id, year_id)
                     )
+                    behaviour = await _optional(
+                        "behaviour", client.async_get_behaviour(student_id, year_id)
+                    )
+                    behaviour_chronological = await _optional(
+                        "behaviour chronology",
+                        client.async_get_behaviour_chronological(student_id, year_id),
+                    )
+
+                homework = await _optional(
+                    "homework", client.async_get_homework(student_id, today)
+                )
 
                 result["children"][key] = {
                     "profile": child,
                     "timetable": _merge_timetables(current_payload, next_payload),
                     "academic_calendar": calendars[pair],
+                    "year_id": year_id,
+                    "attendance": attendance,
+                    "homework": homework,
+                    "behaviour": behaviour,
+                    "behaviour_chronological": behaviour_chronological,
                 }
             return result
         except MCASAuthError as err:
