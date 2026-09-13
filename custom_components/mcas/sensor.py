@@ -42,9 +42,24 @@ async def async_setup_entry(
                 MCASSchoolFinishSensor(coordinator, entry, child_key, profile),
                 MCASNextSchoolStartSensor(coordinator, entry, child_key, profile),
                 MCASNextSchoolDaySensor(coordinator, entry, child_key, profile),
+                MCASAttendanceSensor(coordinator, entry, child_key, profile),
+                MCASHomeworkOutstandingSensor(coordinator, entry, child_key, profile),
+                MCASNextHomeworkSensor(coordinator, entry, child_key, profile),
+                MCASBehaviourPointsSensor(coordinator, entry, child_key, profile),
+                MCASLatestBehaviourSensor(coordinator, entry, child_key, profile),
             ]
         )
     async_add_entities(entities)
+
+
+def _child_payload(data: dict[str, Any], child_key: str, key: str) -> dict[str, Any]:
+    value = data.get("children", {}).get(child_key, {}).get(key, {})
+    return value if isinstance(value, dict) else {}
+
+
+def _homework_rows(data: dict[str, Any], child_key: str) -> list[dict[str, Any]]:
+    rows = _child_payload(data, child_key, "homework").get("Table", [])
+    return rows if isinstance(rows, list) else []
 
 
 class MCASSensorBase(CoordinatorEntity[MCASDataUpdateCoordinator], SensorEntity):
@@ -226,3 +241,167 @@ class MCASNextSchoolDaySensor(MCASSensorBase):
             if day is not None and day >= today and is_school_day(item):
                 candidates.append(day)
         return min(candidates) if candidates else None
+
+
+class MCASAttendanceSensor(MCASSensorBase):
+    _attr_name = "Attendance"
+    _attr_icon = "mdi:account-check"
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "attendance")
+
+    def _summary(self) -> dict[str, Any] | None:
+        rows = _child_payload(self.coordinator.data, self.child_key, "attendance").get("Table5", [])
+        return rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+
+    @property
+    def native_value(self):
+        summary = self._summary()
+        if not summary:
+            return None
+        total = int(summary.get("TotalMarks") or 0)
+        present = int(summary.get("PresentMarks") or 0)
+        return round((present / total) * 100, 1) if total else None
+
+    @property
+    def extra_state_attributes(self):
+        summary = self._summary()
+        if not summary:
+            return {}
+        return {
+            "total_marks": summary.get("TotalMarks"),
+            "present": summary.get("PresentMarks"),
+            "authorised_absent": summary.get("AbsentMarks"),
+            "unauthorised_absent": summary.get("UAbsentMarks"),
+            "late": summary.get("LateMarks"),
+            "not_taken": summary.get("NotTakenMarks"),
+        }
+
+
+class MCASHomeworkOutstandingSensor(MCASSensorBase):
+    _attr_name = "Homework outstanding"
+    _attr_icon = "mdi:book-open-page-variant"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "homework_outstanding")
+
+    def _outstanding(self) -> list[dict[str, Any]]:
+        return [
+            item
+            for item in _homework_rows(self.coordinator.data, self.child_key)
+            if not bool(item.get("IsPast")) and not bool(item.get("IsHomeworkSubmitted"))
+        ]
+
+    @property
+    def native_value(self):
+        return len(self._outstanding())
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "titles": [item.get("HomeworkTitle") for item in self._outstanding()[:10]],
+        }
+
+
+class MCASNextHomeworkSensor(MCASSensorBase):
+    _attr_name = "Next homework due"
+    _attr_icon = "mdi:book-clock"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "next_homework_due")
+
+    def _next(self):
+        candidates = []
+        for item in _homework_rows(self.coordinator.data, self.child_key):
+            if bool(item.get("IsHomeworkSubmitted")):
+                continue
+            due = parse_local_datetime(item.get("DueDate"))
+            if due is not None and due >= dt_util.now():
+                candidates.append((due, item))
+        return min(candidates, key=lambda value: value[0]) if candidates else None
+
+    @property
+    def native_value(self):
+        item = self._next()
+        return None if item is None else item[1].get("HomeworkTitle")
+
+    @property
+    def extra_state_attributes(self):
+        item = self._next()
+        if item is None:
+            return {}
+        due, homework = item
+        return {
+            "due": due.isoformat(),
+            "subject": homework.get("Subject"),
+            "class": homework.get("CollectionDescription"),
+            "assigned_by": homework.get("AssignedBy"),
+            "description": homework.get("HomeworkDescription"),
+        }
+
+
+class MCASBehaviourPointsSensor(MCASSensorBase):
+    _attr_name = "Behaviour points"
+    _attr_icon = "mdi:star-circle"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "behaviour_points")
+
+    def _summary(self):
+        rows = _child_payload(self.coordinator.data, self.child_key, "behaviour").get("Table4", [])
+        return rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+
+    @property
+    def native_value(self):
+        summary = self._summary()
+        if not summary:
+            return None
+        try:
+            return int(summary.get("ShowTotalPointsAllTime"))
+        except (TypeError, ValueError):
+            return summary.get("ShowTotalPointsAllTime")
+
+    @property
+    def extra_state_attributes(self):
+        summary = self._summary()
+        if not summary:
+            return {}
+        return {
+            "positive_points_all_time": summary.get("PositivePointsAllTime"),
+            "negative_points_all_time": summary.get("NegativePointsAllTime"),
+        }
+
+
+class MCASLatestBehaviourSensor(MCASSensorBase):
+    _attr_name = "Latest behaviour"
+    _attr_icon = "mdi:account-star"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "latest_behaviour")
+
+    def _latest(self):
+        rows = _child_payload(
+            self.coordinator.data, self.child_key, "behaviour_chronological"
+        ).get("StudentEventsList", [])
+        return rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+
+    @property
+    def native_value(self):
+        item = self._latest()
+        return None if item is None else item.get("EventName") or item.get("EventType")
+
+    @property
+    def extra_state_attributes(self):
+        item = self._latest()
+        if not item:
+            return {}
+        return {
+            "event_date": item.get("EventDate"),
+            "event_type": item.get("EventType"),
+            "points": item.get("Adjustment"),
+            "subject": item.get("Subject"),
+            "class": item.get("Class"),
+            "owner": item.get("Owner"),
+            "comments": item.get("Comments"),
+        }
