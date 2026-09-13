@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 DOMAIN = "mcas"
-PLATFORMS = ["sensor", "calendar"]
+PLATFORMS = ["sensor"]
 
 API_BASE = "https://appsapi.bromcom.com/Nucleus/api"
 TOKEN_PATH = "/token"
