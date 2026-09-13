@@ -13,9 +13,14 @@ from .const import (
     API_BASE,
     APPLICATION_ID,
     APPLICATION_SECRET,
+    ATTENDANCE_PATH,
+    BEHAVIOUR_CHRONOLOGICAL_PATH,
+    BEHAVIOUR_PATH,
     DISCOVERY_BASE,
+    HOMEWORK_PATH,
     SCHOOL_CONTACT_PATH,
     TIMETABLE_PATH,
+    TIMETABLE_YEARS_PATH,
     TOKEN_PATH,
     USER_AGENT,
     USER_LIST_PATH,
@@ -77,7 +82,6 @@ class MCASClient:
     async def async_discover_school_contacts(
         session: ClientSession, email: str
     ) -> list[MCASSchoolContact]:
-        """Resolve MCAS school/contact pairs for a parent email address."""
         payload = {
             "ApplicationId": APPLICATION_ID,
             "ApplicationSecret": APPLICATION_SECRET,
@@ -93,9 +97,7 @@ class MCASClient:
                 response.raise_for_status()
                 data = await response.json()
         except ClientResponseError as err:
-            raise MCASApiError(
-                f"MCAS school discovery failed: {err.status}"
-            ) from err
+            raise MCASApiError(f"MCAS school discovery failed: {err.status}") from err
 
         contacts: dict[tuple[str, str], MCASSchoolContact] = {}
         for item in _walk_dicts(data):
@@ -107,7 +109,6 @@ class MCASClient:
         return list(contacts.values())
 
     async def async_get_hashed_password(self) -> str:
-        """Ask the official MCAS hashing endpoint to transform the parent password."""
         payload = {
             "ApplicationId": APPLICATION_ID,
             "ApplicationSecret": APPLICATION_SECRET,
@@ -139,7 +140,6 @@ class MCASClient:
         return hashed_password
 
     async def authenticate(self) -> MCASToken:
-        """Authenticate using the same server-side password transform as the official MCAS app."""
         password_hash = await self.async_get_hashed_password()
         payload = {
             "schoolid": self.school_id,
@@ -156,9 +156,7 @@ class MCASClient:
         }
         try:
             async with self._session.post(
-                f"{API_BASE}{TOKEN_PATH}",
-                data=payload,
-                headers={"User-Agent": USER_AGENT},
+                f"{API_BASE}{TOKEN_PATH}", data=payload, headers={"User-Agent": USER_AGENT}
             ) as response:
                 if response.status in (400, 401, 403):
                     raise MCASAuthError("MCAS rejected the supplied credentials")
@@ -170,7 +168,6 @@ class MCASClient:
         token = data.get("access_token")
         if not token:
             raise MCASAuthError("MCAS token response did not contain an access token")
-
         self._token = MCASToken(
             access_token=token,
             expires_in=int(data.get("expires_in", 0)),
@@ -189,16 +186,12 @@ class MCASClient:
             "ProxyType": "mcas",
             "User-Agent": USER_AGENT,
         }
-        async with self._session.get(
-            f"{API_BASE}{path}", headers=headers, params=params
-        ) as response:
+        async with self._session.get(f"{API_BASE}{path}", headers=headers, params=params) as response:
             if response.status == 401:
                 await self.authenticate()
                 assert self._token is not None
                 headers["Authorization"] = f"Bearer {self._token.access_token}"
-                async with self._session.get(
-                    f"{API_BASE}{path}", headers=headers, params=params
-                ) as retry:
+                async with self._session.get(f"{API_BASE}{path}", headers=headers, params=params) as retry:
                     retry.raise_for_status()
                     return await retry.json()
             response.raise_for_status()
@@ -225,9 +218,7 @@ class MCASClient:
                     records.append(item)
         return records
 
-    async def async_get_timetable(
-        self, student_id: str, week_start: date
-    ) -> dict[str, Any]:
+    async def async_get_timetable(self, student_id: str, week_start: date) -> dict[str, Any]:
         return await self._get(
             TIMETABLE_PATH,
             params={
@@ -238,5 +229,29 @@ class MCASClient:
             },
         )
 
+    async def async_get_years(self, student_id: str) -> dict[str, Any]:
+        return await self._get(TIMETABLE_YEARS_PATH.format(student_id=student_id))
+
     async def async_get_academic_calendar(self) -> dict[str, Any]:
         return await self._get(ACADEMIC_CALENDAR_PATH)
+
+    async def async_get_attendance(self, student_id: str, year_id: str) -> dict[str, Any]:
+        return await self._get(ATTENDANCE_PATH.format(student_id=student_id, year_id=year_id))
+
+    async def async_get_homework(self, student_id: str, day: date) -> dict[str, Any]:
+        return await self._get(
+            HOMEWORK_PATH.format(
+                student_id=student_id,
+                day=day.day,
+                month=day.month,
+                year=day.year,
+            )
+        )
+
+    async def async_get_behaviour(self, student_id: str, year_id: str) -> dict[str, Any]:
+        return await self._get(BEHAVIOUR_PATH.format(student_id=student_id, year_id=year_id))
+
+    async def async_get_behaviour_chronological(self, student_id: str, year_id: str) -> dict[str, Any]:
+        return await self._get(
+            BEHAVIOUR_CHRONOLOGICAL_PATH.format(student_id=student_id, year_id=year_id)
+        )
