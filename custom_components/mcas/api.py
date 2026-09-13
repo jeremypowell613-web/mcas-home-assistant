@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -87,24 +89,27 @@ class MCASClient:
             ) from err
 
         contacts: list[MCASSchoolContact] = []
+        if isinstance(data, dict):
+            data = data.get("Table") or data.get("Data") or data.get("data") or []
         if isinstance(data, list):
             for item in data:
                 if not isinstance(item, dict):
                     continue
-                school_id = item.get("SchoolID")
-                contact_id = item.get("ContactID")
+                school_id = item.get("SchoolID") or item.get("schoolID") or item.get("schoolId")
+                contact_id = item.get("ContactID") or item.get("contactID") or item.get("contactId")
                 if school_id and contact_id:
-                    contacts.append(
-                        MCASSchoolContact(str(school_id), str(contact_id))
-                    )
+                    contacts.append(MCASSchoolContact(str(school_id), str(contact_id)))
         return contacts
 
     async def authenticate(self) -> MCASToken:
-        """Authenticate with parent credentials over TLS."""
+        """Authenticate using the password transform used by the official MCAS client."""
+        password_hash = base64.b64encode(
+            hashlib.sha256(self.password.encode("utf-8")).digest()
+        ).decode("ascii")
         payload = {
             "schoolid": self.school_id,
             "username": self.username,
-            "password": self.password,
+            "password": password_hash,
             "grant_type": "password",
             "apiSource": "app",
             "userType": "mcas",
@@ -112,7 +117,7 @@ class MCASClient:
             "application_secret": APPLICATION_SECRET,
             "ipAddress": "127.0.0.1",
             "mcasParentLoginFromMIS": "false",
-            "isPasswordHash": "false",
+            "isPasswordHash": "True",
         }
         try:
             async with self._session.post(
@@ -146,6 +151,7 @@ class MCASClient:
             "Authorization": f"Bearer {self._token.access_token}",
             "SchoolID": self.school_id,
             "ContactID": self.contact_id,
+            "ProxyType": "mcas",
             "User-Agent": USER_AGENT,
         }
         async with self._session.get(
@@ -168,7 +174,14 @@ class MCASClient:
             USER_LIST_PATH,
             params={"includeStudentPhotosData": str(include_photos).lower()},
         )
-        return data if isinstance(data, list) else []
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("Table", "Users", "Students", "Data", "data"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
 
     async def async_get_timetable(
         self, student_id: str, week_start: date
