@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 DOMAIN = "mcas"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "calendar"]
 
 API_BASE = "https://appsapi.bromcom.com/Nucleus/api"
 DISCOVERY_BASE = "https://cloudmis.bromcom.com/Nucleus/api"
@@ -32,4 +32,4 @@ CONF_NAME = "name"
 CONF_SCHOOL_NAME = "school_name"
 
 DEFAULT_UPDATE_INTERVAL = timedelta(minutes=30)
-USER_AGENT = "HomeAssistant-Arcadia-MCAS/0.2"
+USER_AGENT = "HomeAssistant-Arcadia-MCAS/0.3"
