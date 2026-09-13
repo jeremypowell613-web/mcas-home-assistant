@@ -13,7 +13,12 @@ TOKEN_PATH = "/token"
 SCHOOL_CONTACT_PATH = "/api/v1/mcas/user/schoolcontactinfoV2"
 USER_LIST_PATH = "/api/v1/mcas/user/userList"
 TIMETABLE_PATH = "/api/v1/timetable/mcas/studentTimetableByWeekStart"
+TIMETABLE_YEARS_PATH = "/api/v1/timetable/mcas/years/{student_id}"
 ACADEMIC_CALENDAR_PATH = "/api/v1/calendars/mcas/academiccalendar"
+ATTENDANCE_PATH = "/api/v1/attendance/mcas/details/{student_id}/{year_id}/-1"
+HOMEWORK_PATH = "/api/v1/mcas/homework/extendeddetails/{student_id}/{day}/{month}/{year}"
+BEHAVIOUR_PATH = "/api/v1/eventRecords/mcas/eventdetails/{student_id}/{year_id}"
+BEHAVIOUR_CHRONOLOGICAL_PATH = "/api/v1/eventRecords/mcas/chronologicalEventDetails/{student_id}/{year_id}/-1/0"
 
 # Public client metadata shipped by the official MCAS mobile client. These values
 # identify the MCAS application, not the parent account. Parent credentials and
@@ -32,4 +37,4 @@ CONF_NAME = "name"
 CONF_SCHOOL_NAME = "school_name"
 
 DEFAULT_UPDATE_INTERVAL = timedelta(minutes=30)
-USER_AGENT = "HomeAssistant-Arcadia-MCAS/0.3"
+USER_AGENT = "HomeAssistant-Arcadia-MCAS/0.4"
