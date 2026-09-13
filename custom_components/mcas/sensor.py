@@ -44,7 +44,8 @@ async def async_setup_entry(
                 MCASNextSchoolDaySensor(coordinator, entry, child_key, profile),
                 MCASAttendanceSensor(coordinator, entry, child_key, profile),
                 MCASHomeworkOutstandingSensor(coordinator, entry, child_key, profile),
-                MCASNextHomeworkSensor(coordinator, entry, child_key, profile),
+                MCASNextHomeworkDueSensor(coordinator, entry, child_key, profile),
+                MCASNextHomeworkTitleSensor(coordinator, entry, child_key, profile),
                 MCASBehaviourPointsSensor(coordinator, entry, child_key, profile),
                 MCASLatestBehaviourSensor(coordinator, entry, child_key, profile),
             ]
@@ -60,6 +61,17 @@ def _child_payload(data: dict[str, Any], child_key: str, key: str) -> dict[str, 
 def _homework_rows(data: dict[str, Any], child_key: str) -> list[dict[str, Any]]:
     rows = _child_payload(data, child_key, "homework").get("Table", [])
     return rows if isinstance(rows, list) else []
+
+
+def _next_homework(data: dict[str, Any], child_key: str):
+    candidates: list[tuple[datetime, dict[str, Any]]] = []
+    for item in _homework_rows(data, child_key):
+        if bool(item.get("IsHomeworkSubmitted")):
+            continue
+        due = parse_local_datetime(item.get("DueDate"))
+        if due is not None and due >= dt_util.now():
+            candidates.append((due, item))
+    return min(candidates, key=lambda value: value[0]) if candidates else None
 
 
 class MCASSensorBase(CoordinatorEntity[MCASDataUpdateCoordinator], SensorEntity):
@@ -299,45 +311,71 @@ class MCASHomeworkOutstandingSensor(MCASSensorBase):
 
     @property
     def extra_state_attributes(self):
-        return {
-            "titles": [item.get("HomeworkTitle") for item in self._outstanding()[:10]],
-        }
+        items = []
+        for item in self._outstanding()[:10]:
+            due = parse_local_datetime(item.get("DueDate"))
+            items.append(
+                {
+                    "title": item.get("HomeworkTitle"),
+                    "subject": item.get("Subject"),
+                    "due": due.isoformat() if due else item.get("DueDate"),
+                    "assigned_by": item.get("AssignedBy"),
+                }
+            )
+        return {"items": items}
 
 
-class MCASNextHomeworkSensor(MCASSensorBase):
+class MCASNextHomeworkDueSensor(MCASSensorBase):
     _attr_name = "Next homework due"
     _attr_icon = "mdi:book-clock"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
 
     def __init__(self, coordinator, entry, child_key, profile):
         super().__init__(coordinator, entry, child_key, profile, "next_homework_due")
 
-    def _next(self):
-        candidates = []
-        for item in _homework_rows(self.coordinator.data, self.child_key):
-            if bool(item.get("IsHomeworkSubmitted")):
-                continue
-            due = parse_local_datetime(item.get("DueDate"))
-            if due is not None and due >= dt_util.now():
-                candidates.append((due, item))
-        return min(candidates, key=lambda value: value[0]) if candidates else None
+    @property
+    def native_value(self) -> datetime | None:
+        item = _next_homework(self.coordinator.data, self.child_key)
+        return None if item is None else item[0]
+
+    @property
+    def extra_state_attributes(self):
+        item = _next_homework(self.coordinator.data, self.child_key)
+        if item is None:
+            return {}
+        due, homework = item
+        return {
+            "title": homework.get("HomeworkTitle"),
+            "subject": homework.get("Subject"),
+            "class": homework.get("CollectionDescription"),
+            "assigned_by": homework.get("AssignedBy"),
+            "description": homework.get("HomeworkDescription"),
+            "due": due.isoformat(),
+        }
+
+
+class MCASNextHomeworkTitleSensor(MCASSensorBase):
+    _attr_name = "Next homework"
+    _attr_icon = "mdi:book-open-variant"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "next_homework_title")
 
     @property
     def native_value(self):
-        item = self._next()
+        item = _next_homework(self.coordinator.data, self.child_key)
         return None if item is None else item[1].get("HomeworkTitle")
 
     @property
     def extra_state_attributes(self):
-        item = self._next()
+        item = _next_homework(self.coordinator.data, self.child_key)
         if item is None:
             return {}
         due, homework = item
         return {
             "due": due.isoformat(),
             "subject": homework.get("Subject"),
-            "class": homework.get("CollectionDescription"),
             "assigned_by": homework.get("AssignedBy"),
-            "description": homework.get("HomeworkDescription"),
         }
 
 
