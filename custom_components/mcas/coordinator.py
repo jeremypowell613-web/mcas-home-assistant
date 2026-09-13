@@ -95,7 +95,20 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 student_id = str(child["student_id"])
                 current_payload = await client.async_get_timetable(student_id, this_week)
-                next_payload = await client.async_get_timetable(student_id, next_week)
+
+                # The future-week endpoint is useful for weekend/Friday look-ahead,
+                # but some MCAS tenants reject future-week requests. It must never
+                # prevent the whole config entry (and calendars/school-day entities)
+                # from loading.
+                next_payload: dict[str, Any] = {}
+                try:
+                    next_payload = await client.async_get_timetable(student_id, next_week)
+                except Exception as err:  # optional enhancement only
+                    _LOGGER.warning(
+                        "MCAS next-week timetable unavailable (%s, status=%s); continuing with current week",
+                        type(err).__name__,
+                        getattr(err, "status", "n/a"),
+                    )
 
                 result["children"][key] = {
                     "profile": child,
