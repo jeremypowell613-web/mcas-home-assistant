@@ -1,25 +1,35 @@
 {
+  "title": "ARCADIA Integrate MCAS",
   "config": {
     "step": {
       "user": {
-        "title": "Connect MyChildAtSchool",
-        "description": "Enter your MCAS parent login details and the application metadata discovered from the official MCAS web client.",
-        "data": {
-          "username": "Parent email / username",
-          "password": "Password",
-          "school_id": "School ID",
-          "contact_id": "Contact ID",
-          "application_id": "Application ID",
-          "application_secret": "Application secret"
-        }
+        "title": "ARCADIA Integrate MCAS",
+        "description": "Connect your MyChildAtSchool parent account. ARCADIA will discover your linked schools and children automatically.",
+        "data": {"username": "Parent email / username", "password": "MCAS password"},
+        "data_description": {"username": "The login used for the MCAS parent app.", "password": "Stored by Home Assistant and used only to authenticate with MCAS."}
+      },
+      "children": {
+        "title": "Choose children",
+        "description": "Select every child you want Home Assistant to integrate. You can change this later from Configure.",
+        "data": {"selected_children": "Children"}
+      },
+      "reauth_confirm": {
+        "title": "Reconnect MCAS",
+        "description": "MCAS needs your current password to reconnect the parent account.",
+        "data": {"password": "MCAS password"}
       }
     },
-    "error": {
-      "invalid_auth": "MCAS rejected the supplied credentials.",
-      "cannot_connect": "Unable to connect to MCAS."
+    "error": {"invalid_auth": "MCAS rejected the supplied credentials.", "cannot_connect": "Unable to connect to MCAS.", "select_child": "Select at least one child."},
+    "abort": {"already_configured": "This MCAS parent account is already configured.", "reauth_successful": "MCAS credentials updated successfully."}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Manage MCAS children",
+        "description": "ARCADIA has refreshed the children linked to this parent account. Choose which children Home Assistant should expose.",
+        "data": {"selected_children": "Integrated children"}
+      }
     },
-    "abort": {
-      "already_configured": "This MCAS account is already configured."
-    }
+    "abort": {"cannot_connect": "Could not refresh the MCAS account. Check connectivity or reauthenticate the integration."}
   }
 }
