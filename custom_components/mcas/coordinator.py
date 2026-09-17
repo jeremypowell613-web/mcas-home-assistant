@@ -62,6 +62,69 @@ def _current_year_id(payload: Any) -> str | None:
     return None
 
 
+def _homework_row(item: Any) -> bool:
+    """Return True for mappings that look like MCAS homework records."""
+    if not isinstance(item, dict):
+        return False
+    keys = set(item)
+    return bool(
+        keys
+        & {
+            "HomeworkID",
+            "HomeworkTitle",
+            "HomeworkDescription",
+            "DueDate",
+            "IsHomeworkSubmitted",
+            "AssignedBy",
+        }
+    )
+
+
+def _normalise_homework(payload: Any) -> dict[str, Any]:
+    """Normalise differing MCAS homework response shapes into a Table list."""
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            if _homework_row(value):
+                marker = (
+                    value.get("HomeworkID"),
+                    value.get("HomeworkTitle"),
+                    value.get("DueDate"),
+                    value.get("Subject"),
+                )
+                if marker not in seen:
+                    seen.add(marker)
+                    rows.append(value)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    rows.sort(key=lambda item: str(item.get("DueDate") or ""))
+    return {"Table": rows}
+
+
+def _payload_shape(payload: Any) -> str:
+    """Describe response structure without logging student data or homework text."""
+    if isinstance(payload, dict):
+        parts: list[str] = []
+        for key, value in payload.items():
+            if isinstance(value, list):
+                parts.append(f"{key}=list[{len(value)}]")
+            elif isinstance(value, dict):
+                parts.append(f"{key}=dict")
+            else:
+                parts.append(f"{key}={type(value).__name__}")
+        return ", ".join(parts[:20]) or "empty-dict"
+    if isinstance(payload, list):
+        return f"list[{len(payload)}]"
+    return type(payload).__name__
+
+
 async def _optional(label: str, awaitable) -> dict[str, Any]:
     try:
         value = await awaitable
@@ -143,9 +206,15 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         client.async_get_behaviour_chronological(student_id, year_id),
                     )
 
-                homework = await _optional(
+                homework_raw = await _optional(
                     "homework", client.async_get_homework(student_id, today)
                 )
+                homework = _normalise_homework(homework_raw)
+                if not homework["Table"]:
+                    _LOGGER.debug(
+                        "MCAS homework returned no recognisable rows; response shape: %s",
+                        _payload_shape(homework_raw),
+                    )
 
                 result["children"][key] = {
                     "profile": child,
