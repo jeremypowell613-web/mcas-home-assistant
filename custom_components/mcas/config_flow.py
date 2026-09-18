@@ -324,7 +324,10 @@ def _health_summary(hass, entry) -> str:
     warnings = diagnostics.get("warnings", []) if isinstance(diagnostics, dict) else []
     if not warnings:
         return "Latest integration health: OK — no unexpected responses were recorded on the last refresh."
-    lines = ["Latest integration health: attention needed."]
+    lines = [
+        "Latest integration health: attention needed.",
+        "Please send the diagnostic text below to the developer.",
+    ]
     lines.extend(f"• {warning}" for warning in warnings[:6])
     if len(warnings) > 6:
         lines.append(f"• plus {len(warnings) - 6} more warning(s) in the Home Assistant log")
