@@ -315,6 +315,22 @@ class MCASConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+def _health_summary(hass, entry) -> str:
+    """Return a safe human-readable health summary for the options flow."""
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is None:
+        return "Latest integration health: not available until the integration has loaded."
+    diagnostics = (coordinator.data or {}).get("_diagnostics", {})
+    warnings = diagnostics.get("warnings", []) if isinstance(diagnostics, dict) else []
+    if not warnings:
+        return "Latest integration health: OK — no unexpected responses were recorded on the last refresh."
+    lines = ["Latest integration health: attention needed."]
+    lines.extend(f"• {warning}" for warning in warnings[:6])
+    if len(warnings) > 6:
+        lines.append(f"• plus {len(warnings) - 6} more warning(s) in the Home Assistant log")
+    return "\n".join(lines)
+
+
 class MCASOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         try:
@@ -351,6 +367,7 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
             if not new_selected:
                 return self.async_show_form(
                     step_id="init",
+                    description_placeholders={"health_summary": _health_summary(self.hass, self.config_entry)},
                     data_schema=vol.Schema(
                         {
                             vol.Required(
@@ -380,6 +397,7 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
         return self.async_show_form(
             step_id="init",
+            description_placeholders={"health_summary": _health_summary(self.hass, self.config_entry)},
             data_schema=vol.Schema(
                 {
                     vol.Required(

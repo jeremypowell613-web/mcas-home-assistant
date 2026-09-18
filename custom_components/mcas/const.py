@@ -7,7 +7,7 @@ from datetime import timedelta
 DOMAIN = "mcas"
 PLATFORMS = ["sensor", "binary_sensor", "calendar", "update"]
 
-INTEGRATION_VERSION = "2.0.0"
+INTEGRATION_VERSION = "2.0.1"
 GITHUB_REPOSITORY = "jeremypowell613-web/mcas-home-assistant"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
 GITHUB_RELEASE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
@@ -42,4 +42,4 @@ CONF_NAME = "name"
 CONF_SCHOOL_NAME = "school_name"
 
 DEFAULT_UPDATE_INTERVAL = timedelta(minutes=30)
-USER_AGENT = "HomeAssistant-Arcadia-MCAS/2.0.0"
+USER_AGENT = "HomeAssistant-Arcadia-MCAS/2.0.1"
