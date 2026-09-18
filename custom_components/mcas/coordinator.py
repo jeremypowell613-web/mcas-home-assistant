@@ -125,6 +125,37 @@ def _payload_shape(payload: Any) -> str:
     return type(payload).__name__
 
 
+def _payload_diagnostic(payload: Any) -> str:
+    """Return a safe structural diagnostic with paths, counts and field names."""
+    details: list[str] = []
+
+    def walk(value: Any, path: str, depth: int) -> None:
+        if depth > 4 or len(details) >= 24:
+            return
+        if isinstance(value, dict):
+            keys = sorted(str(key) for key in value.keys())
+            details.append(
+                f"{path}=dict keys=[{','.join(keys[:16])}]"
+            )
+            for key, child in value.items():
+                if isinstance(child, (dict, list)):
+                    walk(child, f"{path}.{key}", depth + 1)
+        elif isinstance(value, list):
+            details.append(f"{path}=list[{len(value)}]")
+            sample = next((item for item in value if isinstance(item, dict)), None)
+            if sample is not None:
+                fields = sorted(str(key) for key in sample.keys())
+                details.append(
+                    f"{path}[] fields=[{','.join(fields[:24])}]"
+                )
+                for key, child in sample.items():
+                    if isinstance(child, (dict, list)):
+                        walk(child, f"{path}[].{key}", depth + 1)
+
+    walk(payload, "root", 0)
+    return " | ".join(details) or _payload_shape(payload)
+
+
 async def _optional(
     label: str, awaitable, warnings: list[str] | None = None
 ) -> dict[str, Any]:
@@ -219,11 +250,15 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 homework = _normalise_homework(homework_raw)
                 if not homework["Table"] and homework_raw:
-                    shape = _payload_shape(homework_raw)
-                    warnings.append(f"homework: unrecognised response shape ({shape})")
+                    diagnostic = _payload_diagnostic(homework_raw)
+                    support = (
+                        "MCAS-DIAG HOMEWORK_UNRECOGNISED_SHAPE | "
+                        f"version=2.0.2 | {diagnostic}"
+                    )
+                    warnings.append(support)
                     _LOGGER.warning(
-                        "MCAS homework returned no recognisable rows; response shape: %s",
-                        shape,
+                        "Please send this to the developer: %s",
+                        support,
                     )
 
                 result["children"][key] = {
