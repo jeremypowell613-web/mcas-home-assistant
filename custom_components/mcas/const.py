@@ -5,7 +5,12 @@ from __future__ import annotations
 from datetime import timedelta
 
 DOMAIN = "mcas"
-PLATFORMS = ["sensor", "binary_sensor", "calendar"]
+PLATFORMS = ["sensor", "binary_sensor", "calendar", "update"]
+
+INTEGRATION_VERSION = "0.4.0"
+GITHUB_REPOSITORY = "jeremypowell613-web/mcas-home-assistant"
+GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
+GITHUB_RELEASE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
 
 API_BASE = "https://appsapi.bromcom.com/Nucleus/api"
 DISCOVERY_BASE = "https://cloudmis.bromcom.com/Nucleus/api"
