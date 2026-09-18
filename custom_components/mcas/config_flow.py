@@ -7,6 +7,8 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -83,6 +85,62 @@ def _selected_for_discovered(
         for child in discovered
         if _child_identity(child) in selected_identities
     ]
+
+
+def _selected_identities(
+    children: list[dict[str, Any]], selected_keys: list[str] | set[str]
+) -> set[str]:
+    """Return stable child identities for a selection of child keys."""
+    selected = set(selected_keys)
+    return {
+        _child_identity(child)
+        for child in children
+        if _child_key(child) in selected
+    }
+
+
+async def _async_remove_deselected_children(
+    hass,
+    entry,
+    stored_children: list[dict[str, Any]],
+    stored_selected: list[str],
+    discovered_children: list[dict[str, Any]],
+    new_selected: list[str],
+) -> None:
+    """Remove registry entries belonging to children explicitly deselected by the user."""
+    previous_identities = _selected_identities(stored_children, stored_selected)
+    new_identities = _selected_identities(discovered_children, new_selected)
+    removed_identities = previous_identities - new_identities
+    if not removed_identities:
+        return
+
+    removed_keys = {
+        _child_key(child)
+        for child in stored_children
+        if _child_identity(child) in removed_identities
+    }
+
+    entity_registry = er.async_get(hass)
+    for entity in list(entity_registry.entities.values()):
+        if entity.config_entry_id != entry.entry_id:
+            continue
+        unique_id = str(entity.unique_id or "")
+        if any(
+            unique_id.startswith(f"{entry.entry_id}_{child_key}_")
+            for child_key in removed_keys
+        ):
+            entity_registry.async_remove(entity.entity_id)
+
+    device_registry = dr.async_get(hass)
+    for child_key in removed_keys:
+        device = device_registry.async_get_device(identifiers={(DOMAIN, child_key)})
+        if device is not None:
+            device_registry.async_remove_device(device.id)
+
+    _LOGGER.info(
+        "Removed Home Assistant registry entries for %d deselected MCAS child device(s)",
+        len(removed_keys),
+    )
 
 
 async def _discover(hass, username: str, password: str) -> list[dict[str, str]]:
@@ -282,10 +340,6 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
             stored_children, stored_selected, children
         )
 
-        self.hass.config_entries.async_update_entry(
-            self.config_entry,
-            data={**self.config_entry.data, CONF_CHILDREN: children},
-        )
         choices = [
             selector.SelectOptionDict(
                 value=_child_key(c), label=f"{c['name']} — {c['school_name']}"
@@ -293,6 +347,36 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
             for c in children
         ]
         if user_input is not None:
+            new_selected = list(user_input.get(CONF_SELECTED_CHILDREN, []))
+            if not new_selected:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_SELECTED_CHILDREN, default=selected
+                            ): selector.SelectSelector(
+                                selector.SelectSelectorConfig(
+                                    options=choices, multiple=True
+                                )
+                            )
+                        }
+                    ),
+                    errors={"base": "select_child"},
+                )
+
+            await _async_remove_deselected_children(
+                self.hass,
+                self.config_entry,
+                stored_children,
+                stored_selected,
+                children,
+                new_selected,
+            )
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data={**self.config_entry.data, CONF_CHILDREN: children},
+            )
             return self.async_create_entry(title="", data=user_input)
         return self.async_show_form(
             step_id="init",
