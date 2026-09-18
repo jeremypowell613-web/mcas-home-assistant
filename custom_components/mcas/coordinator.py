@@ -125,17 +125,22 @@ def _payload_shape(payload: Any) -> str:
     return type(payload).__name__
 
 
-async def _optional(label: str, awaitable) -> dict[str, Any]:
+async def _optional(
+    label: str, awaitable, warnings: list[str] | None = None
+) -> dict[str, Any]:
     try:
         value = await awaitable
         return value if isinstance(value, dict) else {}
     except Exception as err:
+        status = getattr(err, "status", "n/a")
         _LOGGER.warning(
             "MCAS optional %s unavailable (%s, status=%s)",
             label,
             type(err).__name__,
-            getattr(err, "status", "n/a"),
+            status,
         )
+        if warnings is not None:
+            warnings.append(f"{label}: unavailable ({type(err).__name__}, status={status})")
         return {}
 
 
@@ -164,7 +169,8 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 [_child_key(c) for c in all_children],
             )
         )
-        result: dict[str, Any] = {"children": {}}
+        warnings: list[str] = []
+        result: dict[str, Any] = {"children": {}, "_diagnostics": {"warnings": warnings}}
         calendars: dict[tuple[str, str], dict[str, Any]] = {}
         today = date.today()
         this_week = _monday(today)
@@ -186,9 +192,10 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 next_payload = await _optional(
                     "next-week timetable",
                     client.async_get_timetable(student_id, next_week),
+                    warnings,
                 )
 
-                years = await _optional("school years", client.async_get_years(student_id))
+                years = await _optional("school years", client.async_get_years(student_id), warnings)
                 year_id = _current_year_id(years)
 
                 attendance: dict[str, Any] = {}
@@ -196,24 +203,27 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 behaviour_chronological: dict[str, Any] = {}
                 if year_id:
                     attendance = await _optional(
-                        "attendance", client.async_get_attendance(student_id, year_id)
+                        "attendance", client.async_get_attendance(student_id, year_id), warnings
                     )
                     behaviour = await _optional(
-                        "behaviour", client.async_get_behaviour(student_id, year_id)
+                        "behaviour", client.async_get_behaviour(student_id, year_id), warnings
                     )
                     behaviour_chronological = await _optional(
                         "behaviour chronology",
                         client.async_get_behaviour_chronological(student_id, year_id),
+                        warnings,
                     )
 
                 homework_raw = await _optional(
-                    "homework", client.async_get_homework(student_id, today)
+                    "homework", client.async_get_homework(student_id, today), warnings
                 )
                 homework = _normalise_homework(homework_raw)
-                if not homework["Table"]:
-                    _LOGGER.debug(
+                if not homework["Table"] and homework_raw:
+                    shape = _payload_shape(homework_raw)
+                    warnings.append(f"homework: unrecognised response shape ({shape})")
+                    _LOGGER.warning(
                         "MCAS homework returned no recognisable rows; response shape: %s",
-                        _payload_shape(homework_raw),
+                        shape,
                     )
 
                 result["children"][key] = {
