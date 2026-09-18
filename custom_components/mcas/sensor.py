@@ -180,14 +180,22 @@ class MCASSchoolStatusSensor(MCASSensorBase):
     def native_value(self):
         target = dt_util.now().date() + timedelta(days=self.offset_days)
         item = academic_day_for(self.coordinator.data, self.child_key, target)
-        return None if item is None else item.get("DayStatusDescription")
+        if item is not None:
+            return item.get("DayStatusDescription") or ("School day" if is_school_day(item) else "Not a school day")
+        if target.weekday() >= 5:
+            return "Not a school day"
+        return "Unknown"
 
     @property
     def extra_state_attributes(self):
         target = dt_util.now().date() + timedelta(days=self.offset_days)
         item = academic_day_for(self.coordinator.data, self.child_key, target)
         if not item:
-            return {"date": target.isoformat()}
+            return {
+                "date": target.isoformat(),
+                "school_day": False if target.weekday() >= 5 else None,
+                "reason": "weekend" if target.weekday() >= 5 else "no_calendar_record",
+            }
         return {
             "date": target.isoformat(),
             "status_code": item.get("DayStatusCode"),
@@ -246,12 +254,24 @@ class MCASNextSchoolDaySensor(MCASSensorBase):
 
     @property
     def native_value(self) -> date | None:
-        today = dt_util.now().date()
+        now = dt_util.now()
+        today = now.date()
+        today_ends = [
+            end
+            for lesson in lessons(self.coordinator.data, self.child_key)
+            if (end := parse_local_datetime(lesson.get("EndDate"))) is not None
+            and end.date() == today
+        ]
+        today_finished = bool(today_ends) and max(today_ends) <= now
+
         candidates: list[date] = []
         for item in academic_days(self.coordinator.data, self.child_key):
             day = parse_day(item.get("Day"))
-            if day is not None and day >= today and is_school_day(item):
-                candidates.append(day)
+            if day is None or not is_school_day(item) or day < today:
+                continue
+            if day == today and today_finished:
+                continue
+            candidates.append(day)
         return min(candidates) if candidates else None
 
 
