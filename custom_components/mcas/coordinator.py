@@ -62,22 +62,78 @@ def _current_year_id(payload: Any) -> str | None:
     return None
 
 
+def _pick(item: dict[str, Any], *names: str) -> Any:
+    """Case-insensitive field lookup across MCAS homework DTO variants."""
+    folded = {str(key).casefold(): value for key, value in item.items()}
+    for name in names:
+        if name.casefold() in folded:
+            return folded[name.casefold()]
+    return None
+
+
 def _homework_row(item: Any) -> bool:
-    """Return True for mappings that look like MCAS homework records."""
+    """Return True for mappings that look like any official MCAS homework DTO."""
     if not isinstance(item, dict):
         return False
-    keys = set(item)
-    return bool(
-        keys
-        & {
-            "HomeworkID",
-            "HomeworkTitle",
-            "HomeworkDescription",
-            "DueDate",
-            "IsHomeworkSubmitted",
-            "AssignedBy",
+    keys = {str(key).casefold() for key in item}
+    identity = {
+        "homeworkid",
+        "homeworkid",
+        "assignmentid",
+        "homeworktitle",
+        "title",
+    }
+    supporting = {
+        "duedate",
+        "assigneddate",
+        "createddate",
+        "subject",
+        "subjectname",
+        "homeworkdescription",
+        "description",
+        "ishomeworksubmitted",
+        "iscompleted",
+        "assignmenttype",
+    }
+    return bool(keys & identity) and bool(keys & supporting)
+
+
+def _canonical_homework(item: dict[str, Any]) -> dict[str, Any]:
+    """Map Extended, Office/Assignments and Behaviour homework DTOs to one shape."""
+    submitted = _pick(
+        item,
+        "IsHomeworkSubmitted",
+        "IsAssignmentSubmitted",
+        "IsSubmitted",
+        "IsCompleted",
+        "Completed",
+    )
+    title = _pick(item, "HomeworkTitle", "Title", "Name")
+    description = _pick(item, "HomeworkDescription", "Description", "Instructions")
+    subject = _pick(item, "Subject", "SubjectName", "SubjectDescription")
+    assigned_by = _pick(item, "AssignedBy", "TeacherName", "Teacher", "ContactTeacher")
+    homework_id = _pick(item, "HomeworkID", "HomeworkId", "AssignmentId", "AssignmentID", "Id")
+    due = _pick(item, "DueDate", "Deadline", "EndDate")
+    assigned = _pick(item, "AssignedDate", "CreatedDate", "StartDate")
+    is_past = _pick(item, "IsPast")
+    if is_past is None:
+        is_past = False
+
+    canonical = dict(item)
+    canonical.update(
+        {
+            "HomeworkID": homework_id,
+            "HomeworkTitle": title,
+            "HomeworkDescription": description,
+            "DueDate": due,
+            "AssignedDate": assigned,
+            "Subject": subject,
+            "AssignedBy": assigned_by,
+            "IsHomeworkSubmitted": bool(submitted),
+            "IsPast": bool(is_past),
         }
     )
+    return canonical
 
 
 def _normalise_homework(payload: Any) -> dict[str, Any]:
@@ -88,15 +144,16 @@ def _normalise_homework(payload: Any) -> dict[str, Any]:
     def walk(value: Any) -> None:
         if isinstance(value, dict):
             if _homework_row(value):
+                canonical = _canonical_homework(value)
                 marker = (
-                    value.get("HomeworkID"),
-                    value.get("HomeworkTitle"),
-                    value.get("DueDate"),
-                    value.get("Subject"),
+                    canonical.get("HomeworkID"),
+                    canonical.get("HomeworkTitle"),
+                    canonical.get("DueDate"),
+                    canonical.get("Subject"),
                 )
                 if marker not in seen:
                     seen.add(marker)
-                    rows.append(value)
+                    rows.append(canonical)
             for child in value.values():
                 walk(child)
         elif isinstance(value, list):
@@ -125,22 +182,51 @@ def _payload_shape(payload: Any) -> str:
     return type(payload).__name__
 
 
+def _to_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalised = value.strip().casefold()
+        if normalised in {"true", "1", "yes", "on"}:
+            return True
+        if normalised in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
 def _config_bool(payload: Any, wanted_key: str) -> bool | None:
-    """Find a boolean-like school config value without assuming response shape."""
+    """Find a boolean school config value across keyed and Key/Value responses."""
     wanted = wanted_key.casefold()
     if isinstance(payload, dict):
+        # Direct keyed response.
         for key, value in payload.items():
             if str(key).casefold() == wanted:
-                if isinstance(value, bool):
-                    return value
-                if isinstance(value, (int, float)):
-                    return bool(value)
-                if isinstance(value, str):
-                    normalised = value.strip().casefold()
-                    if normalised in {"true", "1", "yes", "on"}:
-                        return True
-                    if normalised in {"false", "0", "no", "off"}:
-                        return False
+                parsed = _to_bool(value)
+                if parsed is not None:
+                    return parsed
+
+        # Common configuration DTO shape: {"Key": "...", "Value": "..."}.
+        config_key = (
+            payload.get("Key")
+            or payload.get("key")
+            or payload.get("ConfigurationKey")
+            or payload.get("Name")
+        )
+        if config_key is not None and str(config_key).casefold() == wanted:
+            config_value = (
+                payload.get("Value")
+                if "Value" in payload
+                else payload.get("value")
+                if "value" in payload
+                else payload.get("ConfigurationValue")
+            )
+            parsed = _to_bool(config_value)
+            if parsed is not None:
+                return parsed
+
+        for value in payload.values():
             found = _config_bool(value, wanted_key)
             if found is not None:
                 return found
@@ -341,6 +427,7 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 candidate = _normalise_homework(payload)
                                 if candidate["Table"]:
                                     homework = candidate
+                                    result["_diagnostics"].setdefault("homework_backend", {})[key] = label
                                     break
                         if homework["Table"]:
                             break
