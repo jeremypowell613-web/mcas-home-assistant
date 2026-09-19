@@ -1,5 +1,7 @@
 # ARCADIA Integrate MCAS for Home Assistant
 
+![ARCADIA](assets/arcadia-logo.png)
+
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-blue.svg)](https://www.home-assistant.io/)
 
 Read-only Home Assistant custom integration for Bromcom MyChildAtSchool (MCAS).
@@ -51,3 +53,9 @@ No captured passwords, bearer tokens, student IDs, school IDs, contact IDs, or H
 
 If something does not work, open an issue at:
 https://github.com/jeremypowell613-web/mcas-home-assistant/issues
+
+## Licence and attribution
+
+Copyright © 2026 Jeremy Powell. The integration code is licensed under **GPL-3.0-or-later**. See `LICENSE` and `NOTICE`.
+
+Modified and redistributed versions must follow the GPL requirements, including preserving applicable copyright/licence notices and identifying modifications where required. The ARCADIA name and logo are project branding; the software licence does not grant rights to present an unofficial fork as the official ARCADIA project.
