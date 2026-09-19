@@ -17,7 +17,11 @@ from .const import (
     BEHAVIOUR_CHRONOLOGICAL_PATH,
     BEHAVIOUR_PATH,
     DISCOVERY_BASE,
+    HOMEWORK_ASSIGNMENTS_PATH,
+    HOMEWORK_BEHAVIOUR_PATH,
     HOMEWORK_PATH,
+    SCHOOL_CONFIG_KEYS,
+    SCHOOL_CONFIG_PATH,
     SCHOOL_CONTACT_PATH,
     TIMETABLE_PATH,
     TIMETABLE_YEARS_PATH,
@@ -239,6 +243,7 @@ class MCASClient:
         return await self._get(ATTENDANCE_PATH.format(student_id=student_id, year_id=year_id))
 
     async def async_get_homework(self, student_id: str, day: date) -> dict[str, Any]:
+        """Return the extended-homework payload used by schools in extended mode."""
         return await self._get(
             HOMEWORK_PATH.format(
                 student_id=student_id,
@@ -247,6 +252,96 @@ class MCASClient:
                 year=day.year,
             )
         )
+
+    async def async_get_school_config(self) -> dict[str, Any]:
+        """Return the homework-related school configuration flags."""
+        return await self._get(
+            SCHOOL_CONFIG_PATH,
+            params={"keys": ",".join(SCHOOL_CONFIG_KEYS)},
+        )
+
+    async def _probe_get(
+        self, path: str, *, params: dict[str, Any] | None = None
+    ) -> tuple[int, Any]:
+        """GET an observed candidate endpoint without making a missing variant fatal."""
+        if self._token is None:
+            await self.authenticate()
+        assert self._token is not None
+        headers = {
+            "Authorization": f"Bearer {self._token.access_token}",
+            "SchoolID": self.school_id,
+            "ContactID": self.contact_id,
+            "ProxyType": "mcas",
+            "User-Agent": USER_AGENT,
+        }
+
+        async def request() -> tuple[int, Any]:
+            async with self._session.get(
+                f"{API_BASE}{path}", headers=headers, params=params
+            ) as response:
+                status = response.status
+                if status == 401:
+                    return status, None
+                if status >= 400:
+                    return status, {}
+                try:
+                    return status, await response.json()
+                except (ValueError, TypeError):
+                    return status, {}
+
+        status, data = await request()
+        if status == 401:
+            await self.authenticate()
+            assert self._token is not None
+            headers["Authorization"] = f"Bearer {self._token.access_token}"
+            status, data = await request()
+        return status, data
+
+    async def async_get_homework_assignments_candidates(
+        self, student_id: str, day: date
+    ) -> list[tuple[str, int, Any]]:
+        """Probe official-client assignment endpoint forms observed across MCAS versions."""
+        query = {
+            "studentid": str(student_id),
+            "year": day.year,
+            "month": day.month,
+            "date": day.day,
+        }
+        path_style = (
+            f"{HOMEWORK_ASSIGNMENTS_PATH}/{student_id}/{day.day}/{day.month}/{day.year}"
+        )
+        attempts: list[tuple[str, int, Any]] = []
+        status, payload = await self._probe_get(path_style)
+        attempts.append(("assignments-path", status, payload))
+        if status >= 400 or not payload:
+            status, payload = await self._probe_get(
+                f"{HOMEWORK_ASSIGNMENTS_PATH}/", params=query
+            )
+            attempts.append(("assignments-query", status, payload))
+        return attempts
+
+    async def async_get_homework_behaviour_candidates(
+        self, student_id: str, day: date
+    ) -> list[tuple[str, int, Any]]:
+        """Probe official-client behaviour-homework endpoint forms."""
+        query = {
+            "studentid": str(student_id),
+            "year": day.year,
+            "month": day.month,
+            "date": day.day,
+        }
+        path_style = (
+            f"{HOMEWORK_BEHAVIOUR_PATH}/{student_id}/{day.day}/{day.month}/{day.year}"
+        )
+        attempts: list[tuple[str, int, Any]] = []
+        status, payload = await self._probe_get(path_style)
+        attempts.append(("behaviour-path", status, payload))
+        if status >= 400 or not payload:
+            status, payload = await self._probe_get(
+                f"{HOMEWORK_BEHAVIOUR_PATH}/", params=query
+            )
+            attempts.append(("behaviour-query", status, payload))
+        return attempts
 
     async def async_get_behaviour(self, student_id: str, year_id: str) -> dict[str, Any]:
         return await self._get(BEHAVIOUR_PATH.format(student_id=student_id, year_id=year_id))

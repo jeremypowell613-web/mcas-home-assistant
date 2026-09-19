@@ -11,7 +11,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import MCASApiError, MCASAuthError, MCASClient
-from .const import CONF_CHILDREN, CONF_SELECTED_CHILDREN, DEFAULT_UPDATE_INTERVAL, DOMAIN
+from .const import CONF_CHILDREN, CONF_SELECTED_CHILDREN, DEFAULT_UPDATE_INTERVAL, DOMAIN, INTEGRATION_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,6 +123,41 @@ def _payload_shape(payload: Any) -> str:
     if isinstance(payload, list):
         return f"list[{len(payload)}]"
     return type(payload).__name__
+
+
+def _config_bool(payload: Any, wanted_key: str) -> bool | None:
+    """Find a boolean-like school config value without assuming response shape."""
+    wanted = wanted_key.casefold()
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if str(key).casefold() == wanted:
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, (int, float)):
+                    return bool(value)
+                if isinstance(value, str):
+                    normalised = value.strip().casefold()
+                    if normalised in {"true", "1", "yes", "on"}:
+                        return True
+                    if normalised in {"false", "0", "no", "off"}:
+                        return False
+            found = _config_bool(value, wanted_key)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = _config_bool(item, wanted_key)
+            if found is not None:
+                return found
+    return None
+
+
+def _payload_has_content(payload: Any) -> bool:
+    if isinstance(payload, dict):
+        return any(_payload_has_content(value) for value in payload.values())
+    if isinstance(payload, list):
+        return bool(payload)
+    return payload not in (None, "", False)
 
 
 def _payload_diagnostic(payload: Any) -> str:
@@ -245,16 +280,91 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         warnings,
                     )
 
-                homework_raw = await _optional(
-                    "homework", client.async_get_homework(student_id, today), warnings
-                )
-                homework = _normalise_homework(homework_raw)
-                if not homework["Table"] and homework_raw:
-                    diagnostic = _payload_diagnostic(homework_raw)
-                    support = (
-                        "MCAS-DIAG HOMEWORK_UNRECOGNISED_SHAPE | "
-                        f"version=2.0.2 | {diagnostic}"
+                # MCAS schools can expose homework through different official-client
+                # modules. Preserve the known extended endpoint first, then use school
+                # configuration to order safe read-only fallbacks.
+                homework_attempts: list[str] = []
+                homework_payloads: list[tuple[str, Any]] = []
+
+                try:
+                    extended_raw = await client.async_get_homework(student_id, today)
+                    homework_payloads.append(("extended", extended_raw))
+                    homework_attempts.append(
+                        f"extended:200:{_payload_shape(extended_raw)}"
                     )
+                except Exception as err:
+                    status = getattr(err, "status", "n/a")
+                    homework_attempts.append(
+                        f"extended:{status}:{type(err).__name__}"
+                    )
+
+                school_config = await _optional(
+                    "school homework config", client.async_get_school_config(), None
+                )
+                extended_mode = _config_bool(
+                    school_config, "MCASHomeworkModuleHomeworkModeIsExtended"
+                )
+                assignments_enabled = _config_bool(
+                    school_config, "MCASoffice365OrGoogleAssignmentsEnabled"
+                )
+
+                fallback_order = ["assignments", "behaviour"]
+                if extended_mode is False and assignments_enabled is not True:
+                    fallback_order = ["behaviour", "assignments"]
+                elif assignments_enabled is True:
+                    fallback_order = ["assignments", "behaviour"]
+
+                homework = {"Table": []}
+                for mode, payload in homework_payloads:
+                    candidate = _normalise_homework(payload)
+                    if candidate["Table"]:
+                        homework = candidate
+                        break
+
+                if not homework["Table"]:
+                    for mode in fallback_order:
+                        if mode == "assignments":
+                            attempts = await client.async_get_homework_assignments_candidates(
+                                student_id, today
+                            )
+                        else:
+                            attempts = await client.async_get_homework_behaviour_candidates(
+                                student_id, today
+                            )
+
+                        for label, status, payload in attempts:
+                            homework_attempts.append(
+                                f"{label}:{status}:{_payload_shape(payload)}"
+                            )
+                            if _payload_has_content(payload):
+                                homework_payloads.append((label, payload))
+                                candidate = _normalise_homework(payload)
+                                if candidate["Table"]:
+                                    homework = candidate
+                                    break
+                        if homework["Table"]:
+                            break
+
+                if not homework["Table"]:
+                    nonempty = [
+                        f"{label}={_payload_diagnostic(payload)}"
+                        for label, payload in homework_payloads
+                        if _payload_has_content(payload)
+                    ]
+                    code = (
+                        "HOMEWORK_UNRECOGNISED_SHAPE"
+                        if nonempty
+                        else "HOMEWORK_EMPTY_RESPONSE"
+                    )
+                    support = (
+                        f"MCAS-DIAG {code} | version={INTEGRATION_VERSION} | "
+                        f"date={today.isoformat()} | "
+                        f"extended_mode={extended_mode} | "
+                        f"assignments_enabled={assignments_enabled} | "
+                        f"attempts=[{';'.join(homework_attempts)}]"
+                    )
+                    if nonempty:
+                        support += " | structures=[" + " || ".join(nonempty[:3]) + "]"
                     warnings.append(support)
                     _LOGGER.warning(
                         "Please send this to the developer: %s",
