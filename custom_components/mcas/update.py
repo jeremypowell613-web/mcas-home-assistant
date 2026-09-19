@@ -1,3 +1,8 @@
+# Copyright (C) 2026 Jeremy Powell
+# ARCADIA Integrate MCAS
+# SPDX-License-Identifier: GPL-3.0-or-later
+# See LICENSE and NOTICE in this integration directory.
+
 """Update entity for the MCAS custom integration."""
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.components import persistent_notification
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -220,6 +226,16 @@ class MCASIntegrationUpdate(UpdateEntity):
             _LOGGER.warning(
                 "MCAS %s files installed successfully. Restart Home Assistant to load the new version.",
                 self.latest_version,
+            )
+            persistent_notification.async_create(
+                self.hass,
+                (
+                    f"MCAS has been updated to {self.latest_version}. "
+                    "Restart Home Assistant to finish loading the new version. "
+                    "Go to Settings → System and restart Home Assistant."
+                ),
+                title="Restart Home Assistant to finish MCAS update",
+                notification_id="mcas_update_restart_required",
             )
         finally:
             self._attr_in_progress = False
