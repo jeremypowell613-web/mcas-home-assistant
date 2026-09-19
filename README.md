@@ -8,7 +8,7 @@ Read-only Home Assistant custom integration for Bromcom MyChildAtSchool (MCAS).
 
 ## Current release
 
-Version 2.1 adds school-aware homework discovery. MCAS schools can expose homework through different official-client backends; the integration now checks the school's MCAS configuration, keeps the known extended-homework route, and safely falls back to the assignments and behaviour-homework backends when required.
+Version 2.3 adds school-aware homework discovery. MCAS schools can expose homework through different official-client backends; the integration now checks the school's MCAS configuration, keeps the known extended-homework route, and safely falls back to the assignments and behaviour-homework backends when required.
 
 It also includes:
 
@@ -59,3 +59,8 @@ https://github.com/jeremypowell613-web/mcas-home-assistant/issues
 Copyright © 2026 Jeremy Powell. The integration code is licensed under **GPL-3.0-or-later**. See `LICENSE` and `NOTICE`.
 
 Modified and redistributed versions must follow the GPL requirements, including preserving applicable copyright/licence notices and identifying modifications where required. The ARCADIA name and logo are project branding; the software licence does not grant rights to present an unofficial fork as the official ARCADIA project.
+
+
+## Payments (read-only)
+
+For schools that enable MCAS Online Payments, ARCADIA exposes read-only Home Assistant sensors for outstanding payment items, outstanding balance and the next instalment due. Payment checkout, card changes and other write actions are deliberately not implemented.
