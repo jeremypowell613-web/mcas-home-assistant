@@ -398,26 +398,37 @@ class MCASClient:
         endpoints.
         """
         sid = str(student_id)
-        candidates: list[tuple[str, str, dict[str, Any] | None]] = [
-            ("payments-outstanding-student", f"{PAYMENTS_OUTSTANDING_PATH}/{sid}", None),
-            ("payments-outstanding-query", f"{PAYMENTS_OUTSTANDING_PATH}/", {"studentid": sid}),
-            ("payments-outstanding-current", f"{PAYMENTS_OUTSTANDING_PATH}/", None),
-            ("payments-balances-student", f"{PAYMENTS_BALANCES_PATH}/{sid}", None),
-            ("payments-balances-query", f"{PAYMENTS_BALANCES_PATH}/", {"studentid": sid}),
-            ("payments-balances-current", f"{PAYMENTS_BALANCES_PATH}/", None),
-            ("payments-installments-student", f"{PAYMENTS_INSTALLMENTS_PATH}/{sid}", None),
-            ("payments-installments-query", f"{PAYMENTS_INSTALLMENTS_PATH}/", {"studentid": sid}),
-            ("payments-installments-current", f"{PAYMENTS_INSTALLMENTS_PATH}/", None),
-            ("payments-student-balances", f"{PAYMENTS_STUDENT_BALANCES_PATH}/{sid}", None),
-            ("payments-student-balances-query", f"{PAYMENTS_STUDENT_BALANCES_PATH}/", {"studentid": sid}),
+        groups: list[list[tuple[str, str, dict[str, Any] | None]]] = [
+            [
+                ("payments-outstanding-student", f"{PAYMENTS_OUTSTANDING_PATH}/{sid}", None),
+                ("payments-outstanding-query", f"{PAYMENTS_OUTSTANDING_PATH}/", {"studentid": sid}),
+                ("payments-outstanding-current", f"{PAYMENTS_OUTSTANDING_PATH}/", None),
+            ],
+            [
+                ("payments-balances-student", f"{PAYMENTS_BALANCES_PATH}/{sid}", None),
+                ("payments-balances-query", f"{PAYMENTS_BALANCES_PATH}/", {"studentid": sid}),
+                ("payments-balances-current", f"{PAYMENTS_BALANCES_PATH}/", None),
+            ],
+            [
+                ("payments-installments-student", f"{PAYMENTS_INSTALLMENTS_PATH}/{sid}", None),
+                ("payments-installments-query", f"{PAYMENTS_INSTALLMENTS_PATH}/", {"studentid": sid}),
+                ("payments-installments-current", f"{PAYMENTS_INSTALLMENTS_PATH}/", None),
+            ],
+            [
+                ("payments-student-balances", f"{PAYMENTS_STUDENT_BALANCES_PATH}/{sid}", None),
+                ("payments-student-balances-query", f"{PAYMENTS_STUDENT_BALANCES_PATH}/", {"studentid": sid}),
+            ],
         ]
         attempts: list[tuple[str, int, Any]] = []
-        for label, path, params in candidates:
-            try:
-                status, payload = await self._probe_get(path, params=params)
-            except Exception:
-                continue
-            attempts.append((label, status, payload))
+        for candidates in groups:
+            for label, path, params in candidates:
+                try:
+                    status, payload = await self._probe_get(path, params=params)
+                except Exception:
+                    continue
+                attempts.append((label, status, payload))
+                if status == 200 and payload:
+                    break
         return attempts
 
     async def async_get_behaviour(self, student_id: str, year_id: str) -> dict[str, Any]:
