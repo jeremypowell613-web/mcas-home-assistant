@@ -254,11 +254,27 @@ class MCASClient:
         )
 
     async def async_get_school_config(self) -> dict[str, Any]:
-        """Return the homework-related school configuration flags."""
-        return await self._get(
-            SCHOOL_CONFIG_PATH,
-            params={"keys": ",".join(SCHOOL_CONFIG_KEYS)},
-        )
+        """Return homework-related school configuration using app-compatible requests."""
+        responses: list[Any] = []
+        # The app builds "api/v1/school/config?keys=" and may request one or
+        # multiple keys. Try the combined request first, then each key separately.
+        try:
+            responses.append(
+                await self._get(
+                    SCHOOL_CONFIG_PATH,
+                    params={"keys": ",".join(SCHOOL_CONFIG_KEYS)},
+                )
+            )
+        except Exception:
+            pass
+        for key in SCHOOL_CONFIG_KEYS:
+            try:
+                responses.append(
+                    await self._get(SCHOOL_CONFIG_PATH, params={"keys": key})
+                )
+            except Exception:
+                continue
+        return {"responses": responses}
 
     async def _probe_get(
         self, path: str, *, params: dict[str, Any] | None = None
@@ -300,47 +316,66 @@ class MCASClient:
     async def async_get_homework_assignments_candidates(
         self, student_id: str, day: date
     ) -> list[tuple[str, int, Any]]:
-        """Probe official-client assignment endpoint forms observed across MCAS versions."""
-        query = {
+        """Probe assignment signatures used by current and older MCAS app builds."""
+        query_full = {
             "studentid": str(student_id),
             "year": day.year,
             "month": day.month,
             "date": day.day,
         }
-        path_style = (
-            f"{HOMEWORK_ASSIGNMENTS_PATH}/{student_id}/{day.day}/{day.month}/{day.year}"
-        )
+        candidates: list[tuple[str, str, dict[str, Any] | None]] = [
+            # Current app method is GetHomeworkAssignmentListAsync and ships the
+            # literal "api/v1/mcas/assignments/"; student-id-only is therefore
+            # the primary signature.
+            ("assignments-student", f"{HOMEWORK_ASSIGNMENTS_PATH}/{student_id}", None),
+            ("assignments-student-slash", f"{HOMEWORK_ASSIGNMENTS_PATH}/{student_id}/", None),
+            # Keep observed/legacy forms as compatibility fallbacks.
+            (
+                "assignments-date-path",
+                f"{HOMEWORK_ASSIGNMENTS_PATH}/{student_id}/{day.day}/{day.month}/{day.year}",
+                None,
+            ),
+            ("assignments-query-student", f"{HOMEWORK_ASSIGNMENTS_PATH}/", {"studentid": str(student_id)}),
+            ("assignments-query-full", f"{HOMEWORK_ASSIGNMENTS_PATH}/", query_full),
+        ]
         attempts: list[tuple[str, int, Any]] = []
-        status, payload = await self._probe_get(path_style)
-        attempts.append(("assignments-path", status, payload))
-        if status >= 400 or not payload:
-            status, payload = await self._probe_get(
-                f"{HOMEWORK_ASSIGNMENTS_PATH}/", params=query
-            )
-            attempts.append(("assignments-query", status, payload))
+        for label, path, params in candidates:
+            status, payload = await self._probe_get(path, params=params)
+            attempts.append((label, status, payload))
+            if status == 200 and payload:
+                break
         return attempts
 
     async def async_get_homework_behaviour_candidates(
         self, student_id: str, day: date
     ) -> list[tuple[str, int, Any]]:
-        """Probe official-client behaviour-homework endpoint forms."""
-        query = {
+        """Probe behaviour-homework signatures found in the official MCAS app."""
+        query_full = {
             "studentid": str(student_id),
             "year": day.year,
             "month": day.month,
             "date": day.day,
         }
-        path_style = (
-            f"{HOMEWORK_BEHAVIOUR_PATH}/{student_id}/{day.day}/{day.month}/{day.year}"
-        )
+        candidates: list[tuple[str, str, dict[str, Any] | None]] = [
+            # MCAS 6.56.1 contains the behaviour endpoint immediately followed
+            # by the literal suffix "/999/1". This is the app's primary request.
+            ("behaviour-app", f"{HOMEWORK_BEHAVIOUR_PATH}/{student_id}/999/1", None),
+            ("behaviour-app-slash", f"{HOMEWORK_BEHAVIOUR_PATH}/{student_id}/999/1/", None),
+            ("behaviour-student", f"{HOMEWORK_BEHAVIOUR_PATH}/{student_id}", None),
+            (
+                "behaviour-date-path",
+                f"{HOMEWORK_BEHAVIOUR_PATH}/{student_id}/{day.day}/{day.month}/{day.year}",
+                None,
+            ),
+            ("behaviour-query-student", f"{HOMEWORK_BEHAVIOUR_PATH}/", {"studentid": str(student_id)}),
+            ("behaviour-query-full", f"{HOMEWORK_BEHAVIOUR_PATH}/", query_full),
+        ]
         attempts: list[tuple[str, int, Any]] = []
-        status, payload = await self._probe_get(path_style)
-        attempts.append(("behaviour-path", status, payload))
-        if status >= 400 or not payload:
-            status, payload = await self._probe_get(
-                f"{HOMEWORK_BEHAVIOUR_PATH}/", params=query
-            )
-            attempts.append(("behaviour-query", status, payload))
+        for label, path, params in candidates:
+            status, payload = await self._probe_get(path, params=params)
+            attempts.append((label, status, payload))
+            if status == 200 and payload:
+                break
         return attempts
 
     async def async_get_behaviour(self, student_id: str, year_id: str) -> dict[str, Any]:
