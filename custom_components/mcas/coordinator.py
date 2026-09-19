@@ -193,6 +193,127 @@ def _normalise_homework(payload: Any) -> dict[str, Any]:
     return {"Table": rows}
 
 
+def _payment_student_matches(item: dict[str, Any], student_id: str) -> bool:
+    """Return whether a payment record is for this child when it carries an ID."""
+    value = _pick(item, "StudentID", "StudentId", "student_id")
+    return value is None or str(value) == str(student_id)
+
+
+def _normalise_payments(
+    attempts: list[tuple[str, int, Any]], student_id: str
+) -> dict[str, Any]:
+    """Extract read-only outstanding payment data from official MCAS DTOs."""
+    orders: list[dict[str, Any]] = []
+    balances: list[dict[str, Any]] = []
+    installments: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    def add(kind: str, item: dict[str, Any]) -> None:
+        if not _payment_student_matches(item, student_id):
+            return
+
+        if kind == "order":
+            canonical = {
+                "order_id": _pick(item, "OrderID", "OrderId"),
+                "order_number": _pick(item, "OrderNumber"),
+                "status": _pick(item, "OrderStatusLocalized", "OrderStatus", "Status"),
+                "amount": _pick(item, "OrderPrice", "OrderTotalAmount", "Amount"),
+                "description": _pick(item, "OrderItemDescription", "ItemName", "Description"),
+            }
+            marker = (
+                kind,
+                canonical["order_id"],
+                canonical["order_number"],
+                canonical["amount"],
+            )
+            target = orders
+        elif kind == "balance":
+            canonical = {
+                "club_id": _pick(item, "ClubId", "ClubID"),
+                "name": _pick(item, "ItemName", "ClubName", "Name", "Description"),
+                "total_cost": _pick(item, "TotalCost"),
+                "payment_received": _pick(item, "PaymentReceived"),
+                "outstanding": _pick(item, "TotalOutstanding", "OutstandingBalance", "Balance"),
+                "number_of_sessions": _pick(item, "NumberOfSessions"),
+            }
+            marker = (
+                kind,
+                canonical["club_id"],
+                canonical["name"],
+                canonical["outstanding"],
+            )
+            target = balances
+        else:
+            canonical = {
+                "payment_instalment_id": _pick(
+                    item, "PaymentInstalmentID", "PaymentInstallmentID"
+                ),
+                "name": _pick(
+                    item,
+                    "InstalmentNameLocalized",
+                    "InstallmentNameLocalized",
+                    "ItemName",
+                    "Name",
+                    "Description",
+                ),
+                "due": _pick(item, "DueDate", "NextPaymentDue"),
+                "amount": _pick(item, "Amount", "NextPaymentAmount", "TotalAmount"),
+                "paid": _pick(item, "Paid", "IsPaid"),
+            }
+            marker = (
+                kind,
+                canonical["payment_instalment_id"],
+                canonical["name"],
+                canonical["due"],
+                canonical["amount"],
+            )
+            target = installments
+
+        if marker in seen:
+            return
+        seen.add(marker)
+        if any(value not in (None, "") for value in canonical.values()):
+            target.append(canonical)
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            keys = {str(key).casefold() for key in value}
+            if (
+                "ordernumber" in keys
+                and keys
+                & {
+                    "orderprice",
+                    "ordertotalamount",
+                    "orderstatus",
+                    "orderstatuslocalized",
+                }
+            ):
+                add("order", value)
+            if "totaloutstanding" in keys and keys & {"totalcost", "paymentreceived", "clubid"}:
+                add("balance", value)
+            if (
+                "paymentinstalmentid" in keys
+                or "paymentinstallmentid" in keys
+                or ("nextpaymentdue" in keys and keys & {"amount", "totalamount", "nextpaymentamount"})
+            ):
+                add("installment", value)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    for _label, status, payload in attempts:
+        if status == 200 and _payload_has_content(payload):
+            walk(payload)
+
+    return {
+        "orders": orders,
+        "balances": balances,
+        "installments": installments,
+    }
+
+
 def _payload_shape(payload: Any) -> str:
     """Describe response structure without logging student data or homework text."""
     if isinstance(payload, dict):
@@ -486,6 +607,29 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         support,
                     )
 
+                payment_attempts = await client.async_get_payment_candidates(student_id)
+                payments = _normalise_payments(payment_attempts, student_id)
+                payment_attempt_summary = [
+                    f"{label}:{status}:{_payload_shape(payload)}"
+                    for label, status, payload in payment_attempts
+                ]
+                payment_nonempty = [
+                    f"{label}={_payload_diagnostic(payload)}"
+                    for label, status, payload in payment_attempts
+                    if status == 200 and _payload_has_content(payload)
+                ]
+                if payment_nonempty and not any(
+                    payments[name] for name in ("orders", "balances", "installments")
+                ):
+                    support = (
+                        f"MCAS-DIAG PAYMENTS_UNRECOGNISED_SHAPE | "
+                        f"version={INTEGRATION_VERSION} | "
+                        f"attempts=[{';'.join(payment_attempt_summary)}] | "
+                        f"structures=[{' || '.join(payment_nonempty[:4])}]"
+                    )
+                    warnings.append(support)
+                    _LOGGER.warning("Please send this to the developer: %s", support)
+
                 result["children"][key] = {
                     "profile": child,
                     "timetable": _merge_timetables(current_payload, next_payload),
@@ -493,6 +637,7 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "year_id": year_id,
                     "attendance": attendance,
                     "homework": homework,
+                    "payments": payments,
                     "behaviour": behaviour,
                     "behaviour_chronological": behaviour_chronological,
                 }
