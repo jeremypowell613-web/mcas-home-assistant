@@ -1,6 +1,6 @@
 # ARCADIA Integrate MCAS for Home Assistant
 
-![ARCADIA](assets/arcadia-logo.jpg)
+![ARCADIA](assets/arcadia-logo.png)
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-blue.svg)](https://www.home-assistant.io/)
 
