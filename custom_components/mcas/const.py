@@ -1,3 +1,8 @@
+# Copyright (C) 2026 Jeremy Powell
+# ARCADIA Integrate MCAS
+# SPDX-License-Identifier: GPL-3.0-or-later
+# See LICENSE and NOTICE in this integration directory.
+
 """Constants for the MCAS integration."""
 
 from __future__ import annotations
@@ -7,7 +12,7 @@ from datetime import timedelta
 DOMAIN = "mcas"
 PLATFORMS = ["sensor", "binary_sensor", "calendar", "update"]
 
-INTEGRATION_VERSION = "2.1.1"
+INTEGRATION_VERSION = "2.2.0"
 GITHUB_REPOSITORY = "jeremypowell613-web/mcas-home-assistant"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
 GITHUB_RELEASE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
@@ -49,4 +54,4 @@ CONF_NAME = "name"
 CONF_SCHOOL_NAME = "school_name"
 
 DEFAULT_UPDATE_INTERVAL = timedelta(minutes=30)
-USER_AGENT = "HomeAssistant-Arcadia-MCAS/2.1.1"
+USER_AGENT = "HomeAssistant-Arcadia-MCAS/2.2.0"
