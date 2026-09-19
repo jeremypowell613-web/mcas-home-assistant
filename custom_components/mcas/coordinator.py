@@ -141,7 +141,7 @@ def _canonical_homework(item: dict[str, Any]) -> dict[str, Any]:
     subject = _pick(item, "Subject", "SubjectName", "SubjectDescription")
     assigned_by = _pick(item, "AssignedBy", "TeacherName", "Teacher", "ContactTeacher")
     homework_id = _pick(item, "HomeworkID", "HomeworkId", "AssignmentId", "AssignmentID", "Id")
-    due = _pick(item, "DueDate", "Deadline", "EndDate")
+    due = _pick(item, "DueDate", "DueDateAsDate", "Deadline", "EndDate")
     assigned = _pick(item, "AssignedDate", "CreatedDate", "StartDate")
     is_past = _pick(item, "IsPast")
     if is_past is None:

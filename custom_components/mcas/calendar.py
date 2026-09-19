@@ -177,7 +177,13 @@ class MCASHomeworkCalendar(MCASCalendarBase):
             due = parse_local_datetime(item.get("DueDate"))
             if due is None:
                 continue
-            start = parse_local_datetime(item.get("AvailableFrom")) or due - timedelta(hours=1)
+            start = (
+                parse_local_datetime(item.get("AvailableFrom"))
+                or parse_local_datetime(item.get("AssignedDate"))
+                or due - timedelta(hours=1)
+            )
+            if start >= due:
+                start = due - timedelta(hours=1)
             title = str(item.get("HomeworkTitle") or "Homework")
             description_bits = []
             if item.get("Subject"):
