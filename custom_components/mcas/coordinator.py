@@ -83,11 +83,14 @@ def _homework_row(item: Any) -> bool:
     keys = {str(key).casefold() for key in item}
     identity = {
         "homeworkid",
-        "homeworkid",
         "assignmentid",
         "homeworktitle",
         "title",
     }
+    # Office/Google assignment DTOs use generic ID/Name fields rather than
+    # HomeworkID/HomeworkTitle. Require the companion assignment fields below
+    # so unrelated nested objects are not mistaken for homework.
+    assignment_identity = {"id", "name"}
     supporting = {
         "duedate",
         "assigneddate",
@@ -99,8 +102,17 @@ def _homework_row(item: Any) -> bool:
         "ishomeworksubmitted",
         "iscompleted",
         "assignmenttype",
+        "instructions",
+        "status",
+        "studentid",
+        "schoolid",
     }
-    return bool(keys & identity) and bool(keys & supporting)
+    return (
+        bool(keys & identity) and bool(keys & supporting)
+    ) or (
+        assignment_identity.issubset(keys)
+        and bool(keys & {"duedate", "createddate", "instructions", "status", "studentid"})
+    )
 
 
 def _canonical_homework(item: dict[str, Any]) -> dict[str, Any]:
@@ -113,6 +125,17 @@ def _canonical_homework(item: dict[str, Any]) -> dict[str, Any]:
         "IsCompleted",
         "Completed",
     )
+    if submitted is None:
+        status = _pick(item, "Status")
+        if isinstance(status, str):
+            submitted = status.strip().casefold() in {
+                "complete",
+                "completed",
+                "submitted",
+                "turned in",
+                "turned_in",
+                "done",
+            }
     title = _pick(item, "HomeworkTitle", "Title", "Name")
     description = _pick(item, "HomeworkDescription", "Description", "Instructions")
     subject = _pick(item, "Subject", "SubjectName", "SubjectDescription")
