@@ -1,5 +1,7 @@
 # ARCADIA Integrate MCAS for Home Assistant
 
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/) [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-blue.svg)](https://www.home-assistant.io/)
+
 Read-only Home Assistant custom integration for Bromcom MyChildAtSchool (MCAS).
 
 ## Current release
