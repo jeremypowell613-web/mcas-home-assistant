@@ -1,3 +1,8 @@
+# Copyright (C) 2026 Jeremy Powell
+# ARCADIA Integrate MCAS
+# SPDX-License-Identifier: GPL-3.0-or-later
+# See LICENSE and NOTICE in this integration directory.
+
 """Async read-only MCAS API client."""
 
 from __future__ import annotations
