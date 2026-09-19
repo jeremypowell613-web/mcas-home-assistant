@@ -4,8 +4,9 @@
   "codeowners": ["@jeremypowell613-web"],
   "config_flow": true,
   "documentation": "https://github.com/jeremypowell613-web/mcas-home-assistant",
+  "issue_tracker": "https://github.com/jeremypowell613-web/mcas-home-assistant/issues",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "2.1.0"
+  "version": "2.1.1"
 }
