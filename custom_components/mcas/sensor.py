@@ -339,14 +339,15 @@ class MCASHomeworkOutstandingSensor(MCASSensorBase):
         items = []
         for item in self._outstanding()[:10]:
             due = parse_local_datetime(item.get("DueDate"))
-            items.append(
-                {
-                    "title": item.get("HomeworkTitle"),
-                    "subject": item.get("Subject"),
-                    "due": due.isoformat() if due else item.get("DueDate"),
-                    "assigned_by": item.get("AssignedBy"),
-                }
-            )
+            detail = {
+                "title": item.get("HomeworkTitle"),
+                "due": due.isoformat() if due else item.get("DueDate"),
+            }
+            if item.get("Subject"):
+                detail["subject"] = item.get("Subject")
+            if item.get("AssignedBy"):
+                detail["assigned_by"] = item.get("AssignedBy")
+            items.append(detail)
         return {"items": items}
 
 
@@ -369,14 +370,18 @@ class MCASNextHomeworkDueSensor(MCASSensorBase):
         if item is None:
             return {}
         due, homework = item
-        return {
+        attrs = {
             "title": homework.get("HomeworkTitle"),
+            "due": due.isoformat(),
+        }
+        optional = {
             "subject": homework.get("Subject"),
             "class": homework.get("CollectionDescription"),
             "assigned_by": homework.get("AssignedBy"),
             "description": homework.get("HomeworkDescription"),
-            "due": due.isoformat(),
         }
+        attrs.update({key: value for key, value in optional.items() if value not in (None, "")})
+        return attrs
 
 
 class MCASNextHomeworkTitleSensor(MCASSensorBase):
@@ -397,11 +402,12 @@ class MCASNextHomeworkTitleSensor(MCASSensorBase):
         if item is None:
             return {}
         due, homework = item
-        return {
-            "due": due.isoformat(),
-            "subject": homework.get("Subject"),
-            "assigned_by": homework.get("AssignedBy"),
-        }
+        attrs = {"due": due.isoformat()}
+        if homework.get("Subject"):
+            attrs["subject"] = homework.get("Subject")
+        if homework.get("AssignedBy"):
+            attrs["assigned_by"] = homework.get("AssignedBy")
+        return attrs
 
 
 class MCASBehaviourPointsSensor(MCASSensorBase):
