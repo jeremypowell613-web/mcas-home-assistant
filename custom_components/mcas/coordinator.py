@@ -461,6 +461,10 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.clients = clients
         self.entry = entry
+        # Cache schools/students that conclusively do not expose homework for
+        # this coordinator lifetime so we do not keep polling unsupported
+        # endpoints on every refresh.
+        self._homework_supported: dict[str, bool] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
         all_children = self.entry.data.get(CONF_CHILDREN, [])
@@ -515,97 +519,117 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         warnings,
                     )
 
-                # MCAS schools can expose homework through different official-client
-                # modules. Preserve the known extended endpoint first, then use school
-                # configuration to order safe read-only fallbacks.
-                homework_attempts: list[str] = []
-                homework_payloads: list[tuple[str, Any]] = []
-
-                try:
-                    extended_raw = await client.async_get_homework(student_id, today)
-                    homework_payloads.append(("extended", extended_raw))
-                    homework_attempts.append(
-                        f"extended:200:{_payload_shape(extended_raw)}"
-                    )
-                except Exception as err:
-                    status = getattr(err, "status", "n/a")
-                    homework_attempts.append(
-                        f"extended:{status}:{type(err).__name__}"
-                    )
-
-                school_config = await _optional(
-                    "school homework config", client.async_get_school_config(), None
-                )
-                extended_mode = _config_bool(
-                    school_config, "MCASHomeworkModuleHomeworkModeIsExtended"
-                )
-                assignments_enabled = _config_bool(
-                    school_config, "MCASoffice365OrGoogleAssignmentsEnabled"
-                )
-
-                fallback_order = ["assignments", "behaviour"]
-                if extended_mode is False and assignments_enabled is not True:
-                    fallback_order = ["behaviour", "assignments"]
-                elif assignments_enabled is True:
-                    fallback_order = ["assignments", "behaviour"]
-
                 homework = {"Table": []}
-                for mode, payload in homework_payloads:
-                    candidate = _normalise_homework(payload)
-                    if candidate["Table"]:
-                        homework = candidate
-                        break
+                homework_supported = self._homework_supported.get(key)
 
-                if not homework["Table"]:
-                    for mode in fallback_order:
-                        if mode == "assignments":
-                            attempts = await client.async_get_homework_assignments_candidates(
-                                student_id, today
-                            )
-                        else:
-                            attempts = await client.async_get_homework_behaviour_candidates(
-                                student_id, today
-                            )
+                if homework_supported is not False:
+                    # MCAS schools can expose homework through different official-client
+                    # modules. Detect support once, then stop polling unsupported schools.
+                    homework_attempts: list[str] = []
+                    homework_payloads: list[tuple[str, Any]] = []
 
-                        for label, status, payload in attempts:
-                            homework_attempts.append(
-                                f"{label}:{status}:{_payload_shape(payload)}"
-                            )
-                            if _payload_has_content(payload):
-                                homework_payloads.append((label, payload))
-                                candidate = _normalise_homework(payload)
-                                if candidate["Table"]:
-                                    homework = candidate
-                                    result["_diagnostics"].setdefault("homework_backend", {})[key] = label
-                                    break
-                        if homework["Table"]:
+                    try:
+                        extended_raw = await client.async_get_homework(student_id, today)
+                        homework_payloads.append(("extended", extended_raw))
+                        homework_attempts.append(
+                            f"extended:200:{_payload_shape(extended_raw)}"
+                        )
+                    except Exception as err:
+                        status = getattr(err, "status", "n/a")
+                        homework_attempts.append(
+                            f"extended:{status}:{type(err).__name__}"
+                        )
+
+                    school_config = await _optional(
+                        "school homework config", client.async_get_school_config(), None
+                    )
+                    extended_mode = _config_bool(
+                        school_config, "MCASHomeworkModuleHomeworkModeIsExtended"
+                    )
+                    assignments_enabled = _config_bool(
+                        school_config, "MCASoffice365OrGoogleAssignmentsEnabled"
+                    )
+
+                    fallback_order = ["assignments", "behaviour"]
+                    if extended_mode is False and assignments_enabled is not True:
+                        fallback_order = ["behaviour", "assignments"]
+                    elif assignments_enabled is True:
+                        fallback_order = ["assignments", "behaviour"]
+
+                    for mode, payload in homework_payloads:
+                        candidate = _normalise_homework(payload)
+                        if candidate["Table"]:
+                            homework = candidate
+                            result["_diagnostics"].setdefault("homework_backend", {})[key] = mode
                             break
 
-                if not homework["Table"]:
-                    nonempty = [
-                        f"{label}={_payload_diagnostic(payload)}"
-                        for label, payload in homework_payloads
-                        if _payload_has_content(payload)
-                    ]
-                    code = (
-                        "HOMEWORK_UNRECOGNISED_SHAPE"
-                        if nonempty
-                        else "HOMEWORK_EMPTY_RESPONSE"
-                    )
-                    support = (
-                        f"MCAS-DIAG {code} | version={INTEGRATION_VERSION} | "
-                        f"date={today.isoformat()} | "
-                        f"extended_mode={extended_mode} | "
-                        f"assignments_enabled={assignments_enabled} | "
-                        f"attempts=[{';'.join(homework_attempts)}]"
-                    )
-                    if nonempty:
-                        support += " | structures=[" + " || ".join(nonempty[:3]) + "]"
-                    warnings.append(support)
-                    _LOGGER.warning(
-                        "Please send this to the developer: %s",
-                        support,
-                    )
+                    if not homework["Table"]:
+                        for mode in fallback_order:
+                            if mode == "assignments":
+                                attempts = await client.async_get_homework_assignments_candidates(
+                                    student_id, today
+                                )
+                            else:
+                                attempts = await client.async_get_homework_behaviour_candidates(
+                                    student_id, today
+                                )
+
+                            for label, status, payload in attempts:
+                                homework_attempts.append(
+                                    f"{label}:{status}:{_payload_shape(payload)}"
+                                )
+                                if _payload_has_content(payload):
+                                    homework_payloads.append((label, payload))
+                                    candidate = _normalise_homework(payload)
+                                    if candidate["Table"]:
+                                        homework = candidate
+                                        result["_diagnostics"].setdefault("homework_backend", {})[key] = label
+                                        break
+                            if homework["Table"]:
+                                break
+
+                    if homework["Table"]:
+                        homework_supported = True
+                        self._homework_supported[key] = True
+                    else:
+                        nonempty = [
+                            f"{label}={_payload_diagnostic(payload)}"
+                            for label, payload in homework_payloads
+                            if _payload_has_content(payload)
+                        ]
+                        if nonempty:
+                            # The school exposes a homework module, but this DTO
+                            # is not recognised yet. Keep entities registered and
+                            # provide a safe diagnostic for parser support.
+                            homework_supported = True
+                            self._homework_supported[key] = True
+                            support = (
+                                f"MCAS-DIAG HOMEWORK_UNRECOGNISED_SHAPE | "
+                                f"version={INTEGRATION_VERSION} | "
+                                f"date={today.isoformat()} | "
+                                f"extended_mode={extended_mode} | "
+                                f"assignments_enabled={assignments_enabled} | "
+                                f"attempts=[{';'.join(homework_attempts)}] | "
+                                f"structures=[{' || '.join(nonempty[:3])}]"
+                            )
+                            warnings.append(support)
+                            _LOGGER.warning(
+                                "Please send this to the developer: %s",
+                                support,
+                            )
+                        else:
+                            # All known homework backends are empty/not enabled.
+                            # Treat homework as unsupported for this runtime and
+                            # stop probing the endpoints on subsequent refreshes.
+                            homework_supported = False
+                            self._homework_supported[key] = False
+                            _LOGGER.debug(
+                                "MCAS homework is not exposed for child %s; "
+                                "homework polling disabled until integration reload",
+                                key,
+                            )
+                else:
+                    homework_supported = False
 
                 payment_attempts = await client.async_get_payment_candidates(student_id)
                 payments = _normalise_payments(payment_attempts, student_id)
@@ -637,6 +661,7 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "year_id": year_id,
                     "attendance": attendance,
                     "homework": homework,
+                    "features": {"homework": bool(homework_supported)},
                     "payments": payments,
                     "behaviour": behaviour,
                     "behaviour_chronological": behaviour_chronological,
