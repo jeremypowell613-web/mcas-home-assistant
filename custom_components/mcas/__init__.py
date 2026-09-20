@@ -56,7 +56,8 @@ def _verify_distribution_files() -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    _verify_distribution_files()
+    # File I/O must not run in Home Assistant's event loop.
+    await hass.async_add_executor_job(_verify_distribution_files)
     session = async_get_clientsession(hass)
     clients: dict[tuple[str, str], MCASClient] = {}
     for child in entry.data.get(CONF_CHILDREN, []):

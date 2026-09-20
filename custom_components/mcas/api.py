@@ -25,6 +25,10 @@ from .const import (
     HOMEWORK_ASSIGNMENTS_PATH,
     HOMEWORK_BEHAVIOUR_PATH,
     HOMEWORK_PATH,
+    PAYMENTS_BALANCES_PATH,
+    PAYMENTS_INSTALLMENTS_PATH,
+    PAYMENTS_OUTSTANDING_PATH,
+    PAYMENTS_STUDENT_BALANCES_PATH,
     SCHOOL_CONFIG_KEYS,
     SCHOOL_CONFIG_PATH,
     SCHOOL_CONTACT_PATH,
@@ -381,6 +385,50 @@ class MCASClient:
             attempts.append((label, status, payload))
             if status == 200 and payload:
                 break
+        return attempts
+
+    async def async_get_payment_candidates(
+        self, student_id: str
+    ) -> list[tuple[str, int, Any]]:
+        """Probe read-only payment endpoints shipped by MCAS 6.56.1.
+
+        The app contains these literal routes, but different school setups can
+        scope them by path, query parameter or current authenticated student.
+        Probe only safe GET variants; never invoke checkout/payment mutation
+        endpoints.
+        """
+        sid = str(student_id)
+        groups: list[list[tuple[str, str, dict[str, Any] | None]]] = [
+            [
+                ("payments-outstanding-student", f"{PAYMENTS_OUTSTANDING_PATH}/{sid}", None),
+                ("payments-outstanding-query", f"{PAYMENTS_OUTSTANDING_PATH}/", {"studentid": sid}),
+                ("payments-outstanding-current", f"{PAYMENTS_OUTSTANDING_PATH}/", None),
+            ],
+            [
+                ("payments-balances-student", f"{PAYMENTS_BALANCES_PATH}/{sid}", None),
+                ("payments-balances-query", f"{PAYMENTS_BALANCES_PATH}/", {"studentid": sid}),
+                ("payments-balances-current", f"{PAYMENTS_BALANCES_PATH}/", None),
+            ],
+            [
+                ("payments-installments-student", f"{PAYMENTS_INSTALLMENTS_PATH}/{sid}", None),
+                ("payments-installments-query", f"{PAYMENTS_INSTALLMENTS_PATH}/", {"studentid": sid}),
+                ("payments-installments-current", f"{PAYMENTS_INSTALLMENTS_PATH}/", None),
+            ],
+            [
+                ("payments-student-balances", f"{PAYMENTS_STUDENT_BALANCES_PATH}/{sid}", None),
+                ("payments-student-balances-query", f"{PAYMENTS_STUDENT_BALANCES_PATH}/", {"studentid": sid}),
+            ],
+        ]
+        attempts: list[tuple[str, int, Any]] = []
+        for candidates in groups:
+            for label, path, params in candidates:
+                try:
+                    status, payload = await self._probe_get(path, params=params)
+                except Exception:
+                    continue
+                attempts.append((label, status, payload))
+                if status == 200 and payload:
+                    break
         return attempts
 
     async def async_get_behaviour(self, student_id: str, year_id: str) -> dict[str, Any]:

@@ -48,13 +48,21 @@ async def async_setup_entry(
                 MCASNextSchoolStartSensor(coordinator, entry, child_key, profile),
                 MCASNextSchoolDaySensor(coordinator, entry, child_key, profile),
                 MCASAttendanceSensor(coordinator, entry, child_key, profile),
-                MCASHomeworkOutstandingSensor(coordinator, entry, child_key, profile),
-                MCASNextHomeworkDueSensor(coordinator, entry, child_key, profile),
-                MCASNextHomeworkTitleSensor(coordinator, entry, child_key, profile),
+                MCASOutstandingPaymentsSensor(coordinator, entry, child_key, profile),
+                MCASOutstandingBalanceSensor(coordinator, entry, child_key, profile),
+                MCASNextPaymentDueSensor(coordinator, entry, child_key, profile),
                 MCASBehaviourPointsSensor(coordinator, entry, child_key, profile),
                 MCASLatestBehaviourSensor(coordinator, entry, child_key, profile),
             ]
         )
+        if child_data.get("features", {}).get("homework", True):
+            entities.extend(
+                [
+                    MCASHomeworkOutstandingSensor(coordinator, entry, child_key, profile),
+                    MCASNextHomeworkDueSensor(coordinator, entry, child_key, profile),
+                    MCASNextHomeworkTitleSensor(coordinator, entry, child_key, profile),
+                ]
+            )
     async_add_entities(entities)
 
 
@@ -66,6 +74,27 @@ def _child_payload(data: dict[str, Any], child_key: str, key: str) -> dict[str, 
 def _homework_rows(data: dict[str, Any], child_key: str) -> list[dict[str, Any]]:
     rows = _child_payload(data, child_key, "homework").get("Table", [])
     return rows if isinstance(rows, list) else []
+
+
+def _payment_data(data: dict[str, Any], child_key: str) -> dict[str, Any]:
+    return _child_payload(data, child_key, "payments")
+
+
+def _money(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = (
+            value.replace("£", "")
+            .replace(",", "")
+            .replace("GBP", "")
+            .strip()
+        )
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
 
 
 def _next_homework(data: dict[str, Any], child_key: str):
@@ -407,6 +436,94 @@ class MCASNextHomeworkTitleSensor(MCASSensorBase):
             attrs["subject"] = homework.get("Subject")
         if homework.get("AssignedBy"):
             attrs["assigned_by"] = homework.get("AssignedBy")
+        return attrs
+
+
+class MCASOutstandingPaymentsSensor(MCASSensorBase):
+    _attr_name = "Outstanding payments"
+    _attr_icon = "mdi:cash-clock"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "outstanding_payments")
+
+    def _payments(self) -> dict[str, Any]:
+        return _payment_data(self.coordinator.data, self.child_key)
+
+    @property
+    def native_value(self):
+        payments = self._payments()
+        return sum(
+            len(payments.get(name, []))
+            for name in ("orders", "balances", "installments")
+            if isinstance(payments.get(name), list)
+        )
+
+    @property
+    def extra_state_attributes(self):
+        payments = self._payments()
+        return {
+            "orders": payments.get("orders", [])[:10],
+            "balances": payments.get("balances", [])[:10],
+            "installments": payments.get("installments", [])[:10],
+        }
+
+
+class MCASOutstandingBalanceSensor(MCASSensorBase):
+    _attr_name = "Outstanding balance"
+    _attr_icon = "mdi:cash-multiple"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "GBP"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "outstanding_balance")
+
+    @property
+    def native_value(self):
+        payments = _payment_data(self.coordinator.data, self.child_key)
+        values = [
+            amount
+            for item in payments.get("balances", [])
+            if isinstance(item, dict)
+            and (amount := _money(item.get("outstanding"))) is not None
+        ]
+        return round(sum(values), 2) if values else 0.0
+
+
+class MCASNextPaymentDueSensor(MCASSensorBase):
+    _attr_name = "Next payment due"
+    _attr_icon = "mdi:calendar-cash"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "next_payment_due")
+
+    def _next(self):
+        candidates: list[tuple[datetime, dict[str, Any]]] = []
+        payments = _payment_data(self.coordinator.data, self.child_key)
+        for item in payments.get("installments", []):
+            if not isinstance(item, dict) or bool(item.get("paid")):
+                continue
+            due = parse_local_datetime(item.get("due"))
+            if due is not None and due >= dt_util.now():
+                candidates.append((due, item))
+        return min(candidates, key=lambda value: value[0]) if candidates else None
+
+    @property
+    def native_value(self) -> datetime | None:
+        item = self._next()
+        return None if item is None else item[0]
+
+    @property
+    def extra_state_attributes(self):
+        item = self._next()
+        if item is None:
+            return {}
+        due, payment = item
+        attrs = {"due": due.isoformat()}
+        if payment.get("name"):
+            attrs["name"] = payment.get("name")
+        if payment.get("amount") is not None:
+            attrs["amount"] = payment.get("amount")
         return attrs
 
 

@@ -34,9 +34,12 @@ async def async_setup_entry(
             [
                 MCASTimetableCalendar(coordinator, entry, child_key, profile),
                 MCASAcademicCalendar(coordinator, entry, child_key, profile),
-                MCASHomeworkCalendar(coordinator, entry, child_key, profile),
             ]
         )
+        if child_data.get("features", {}).get("homework", True):
+            entities.append(
+                MCASHomeworkCalendar(coordinator, entry, child_key, profile)
+            )
     async_add_entities(entities)
 
 

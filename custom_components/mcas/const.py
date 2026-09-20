@@ -12,7 +12,7 @@ from datetime import timedelta
 DOMAIN = "mcas"
 PLATFORMS = ["sensor", "binary_sensor", "calendar", "update"]
 
-INTEGRATION_VERSION = "2.2.2"
+INTEGRATION_VERSION = "2.3.0"
 GITHUB_REPOSITORY = "jeremypowell613-web/mcas-home-assistant"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/releases/latest"
 GITHUB_RELEASE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
@@ -29,6 +29,10 @@ ATTENDANCE_PATH = "/api/v1/attendance/mcas/details/{student_id}/{year_id}/-1"
 HOMEWORK_PATH = "/api/v1/mcas/homework/extendeddetails/{student_id}/{day}/{month}/{year}"
 HOMEWORK_ASSIGNMENTS_PATH = "/api/v1/mcas/assignments"
 HOMEWORK_BEHAVIOUR_PATH = "/api/v1/mcas/homework/behaviour"
+PAYMENTS_OUTSTANDING_PATH = "/api/v1/mcas/payments/FindOutstandingPayments"
+PAYMENTS_BALANCES_PATH = "/api/v1/mcas/payments/FindOutstandingBalances"
+PAYMENTS_INSTALLMENTS_PATH = "/api/v1/mcas/payments/findProductsAndPaymentInstalments"
+PAYMENTS_STUDENT_BALANCES_PATH = "/api/v1/mcas/payments/getBalancesForStudents"
 SCHOOL_CONFIG_PATH = "/api/v1/school/config"
 SCHOOL_CONFIG_KEYS = (
     "MCASHomeworkModuleHomeworkModeIsExtended",
@@ -54,4 +58,4 @@ CONF_NAME = "name"
 CONF_SCHOOL_NAME = "school_name"
 
 DEFAULT_UPDATE_INTERVAL = timedelta(minutes=30)
-USER_AGENT = "HomeAssistant-Arcadia-MCAS/2.2.2"
+USER_AGENT = "HomeAssistant-Arcadia-MCAS/2.3.0"

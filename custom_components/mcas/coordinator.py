@@ -193,6 +193,127 @@ def _normalise_homework(payload: Any) -> dict[str, Any]:
     return {"Table": rows}
 
 
+def _payment_student_matches(item: dict[str, Any], student_id: str) -> bool:
+    """Return whether a payment record is for this child when it carries an ID."""
+    value = _pick(item, "StudentID", "StudentId", "student_id")
+    return value is None or str(value) == str(student_id)
+
+
+def _normalise_payments(
+    attempts: list[tuple[str, int, Any]], student_id: str
+) -> dict[str, Any]:
+    """Extract read-only outstanding payment data from official MCAS DTOs."""
+    orders: list[dict[str, Any]] = []
+    balances: list[dict[str, Any]] = []
+    installments: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    def add(kind: str, item: dict[str, Any]) -> None:
+        if not _payment_student_matches(item, student_id):
+            return
+
+        if kind == "order":
+            canonical = {
+                "order_id": _pick(item, "OrderID", "OrderId"),
+                "order_number": _pick(item, "OrderNumber"),
+                "status": _pick(item, "OrderStatusLocalized", "OrderStatus", "Status"),
+                "amount": _pick(item, "OrderPrice", "OrderTotalAmount", "Amount"),
+                "description": _pick(item, "OrderItemDescription", "ItemName", "Description"),
+            }
+            marker = (
+                kind,
+                canonical["order_id"],
+                canonical["order_number"],
+                canonical["amount"],
+            )
+            target = orders
+        elif kind == "balance":
+            canonical = {
+                "club_id": _pick(item, "ClubId", "ClubID"),
+                "name": _pick(item, "ItemName", "ClubName", "Name", "Description"),
+                "total_cost": _pick(item, "TotalCost"),
+                "payment_received": _pick(item, "PaymentReceived"),
+                "outstanding": _pick(item, "TotalOutstanding", "OutstandingBalance", "Balance"),
+                "number_of_sessions": _pick(item, "NumberOfSessions"),
+            }
+            marker = (
+                kind,
+                canonical["club_id"],
+                canonical["name"],
+                canonical["outstanding"],
+            )
+            target = balances
+        else:
+            canonical = {
+                "payment_instalment_id": _pick(
+                    item, "PaymentInstalmentID", "PaymentInstallmentID"
+                ),
+                "name": _pick(
+                    item,
+                    "InstalmentNameLocalized",
+                    "InstallmentNameLocalized",
+                    "ItemName",
+                    "Name",
+                    "Description",
+                ),
+                "due": _pick(item, "DueDate", "NextPaymentDue"),
+                "amount": _pick(item, "Amount", "NextPaymentAmount", "TotalAmount"),
+                "paid": _pick(item, "Paid", "IsPaid"),
+            }
+            marker = (
+                kind,
+                canonical["payment_instalment_id"],
+                canonical["name"],
+                canonical["due"],
+                canonical["amount"],
+            )
+            target = installments
+
+        if marker in seen:
+            return
+        seen.add(marker)
+        if any(value not in (None, "") for value in canonical.values()):
+            target.append(canonical)
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            keys = {str(key).casefold() for key in value}
+            if (
+                "ordernumber" in keys
+                and keys
+                & {
+                    "orderprice",
+                    "ordertotalamount",
+                    "orderstatus",
+                    "orderstatuslocalized",
+                }
+            ):
+                add("order", value)
+            if "totaloutstanding" in keys and keys & {"totalcost", "paymentreceived", "clubid"}:
+                add("balance", value)
+            if (
+                "paymentinstalmentid" in keys
+                or "paymentinstallmentid" in keys
+                or ("nextpaymentdue" in keys and keys & {"amount", "totalamount", "nextpaymentamount"})
+            ):
+                add("installment", value)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    for _label, status, payload in attempts:
+        if status == 200 and _payload_has_content(payload):
+            walk(payload)
+
+    return {
+        "orders": orders,
+        "balances": balances,
+        "installments": installments,
+    }
+
+
 def _payload_shape(payload: Any) -> str:
     """Describe response structure without logging student data or homework text."""
     if isinstance(payload, dict):
@@ -340,6 +461,10 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.clients = clients
         self.entry = entry
+        # Cache schools/students that conclusively do not expose homework for
+        # this coordinator lifetime so we do not keep polling unsupported
+        # endpoints on every refresh.
+        self._homework_supported: dict[str, bool] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
         all_children = self.entry.data.get(CONF_CHILDREN, [])
@@ -394,97 +519,140 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         warnings,
                     )
 
-                # MCAS schools can expose homework through different official-client
-                # modules. Preserve the known extended endpoint first, then use school
-                # configuration to order safe read-only fallbacks.
-                homework_attempts: list[str] = []
-                homework_payloads: list[tuple[str, Any]] = []
-
-                try:
-                    extended_raw = await client.async_get_homework(student_id, today)
-                    homework_payloads.append(("extended", extended_raw))
-                    homework_attempts.append(
-                        f"extended:200:{_payload_shape(extended_raw)}"
-                    )
-                except Exception as err:
-                    status = getattr(err, "status", "n/a")
-                    homework_attempts.append(
-                        f"extended:{status}:{type(err).__name__}"
-                    )
-
-                school_config = await _optional(
-                    "school homework config", client.async_get_school_config(), None
-                )
-                extended_mode = _config_bool(
-                    school_config, "MCASHomeworkModuleHomeworkModeIsExtended"
-                )
-                assignments_enabled = _config_bool(
-                    school_config, "MCASoffice365OrGoogleAssignmentsEnabled"
-                )
-
-                fallback_order = ["assignments", "behaviour"]
-                if extended_mode is False and assignments_enabled is not True:
-                    fallback_order = ["behaviour", "assignments"]
-                elif assignments_enabled is True:
-                    fallback_order = ["assignments", "behaviour"]
-
                 homework = {"Table": []}
-                for mode, payload in homework_payloads:
-                    candidate = _normalise_homework(payload)
-                    if candidate["Table"]:
-                        homework = candidate
-                        break
+                homework_supported = self._homework_supported.get(key)
 
-                if not homework["Table"]:
-                    for mode in fallback_order:
-                        if mode == "assignments":
-                            attempts = await client.async_get_homework_assignments_candidates(
-                                student_id, today
-                            )
-                        else:
-                            attempts = await client.async_get_homework_behaviour_candidates(
-                                student_id, today
-                            )
+                if homework_supported is not False:
+                    # MCAS schools can expose homework through different official-client
+                    # modules. Detect support once, then stop polling unsupported schools.
+                    homework_attempts: list[str] = []
+                    homework_payloads: list[tuple[str, Any]] = []
 
-                        for label, status, payload in attempts:
-                            homework_attempts.append(
-                                f"{label}:{status}:{_payload_shape(payload)}"
-                            )
-                            if _payload_has_content(payload):
-                                homework_payloads.append((label, payload))
-                                candidate = _normalise_homework(payload)
-                                if candidate["Table"]:
-                                    homework = candidate
-                                    result["_diagnostics"].setdefault("homework_backend", {})[key] = label
-                                    break
-                        if homework["Table"]:
+                    try:
+                        extended_raw = await client.async_get_homework(student_id, today)
+                        homework_payloads.append(("extended", extended_raw))
+                        homework_attempts.append(
+                            f"extended:200:{_payload_shape(extended_raw)}"
+                        )
+                    except Exception as err:
+                        status = getattr(err, "status", "n/a")
+                        homework_attempts.append(
+                            f"extended:{status}:{type(err).__name__}"
+                        )
+
+                    school_config = await _optional(
+                        "school homework config", client.async_get_school_config(), None
+                    )
+                    extended_mode = _config_bool(
+                        school_config, "MCASHomeworkModuleHomeworkModeIsExtended"
+                    )
+                    assignments_enabled = _config_bool(
+                        school_config, "MCASoffice365OrGoogleAssignmentsEnabled"
+                    )
+
+                    fallback_order = ["assignments", "behaviour"]
+                    if extended_mode is False and assignments_enabled is not True:
+                        fallback_order = ["behaviour", "assignments"]
+                    elif assignments_enabled is True:
+                        fallback_order = ["assignments", "behaviour"]
+
+                    for mode, payload in homework_payloads:
+                        candidate = _normalise_homework(payload)
+                        if candidate["Table"]:
+                            homework = candidate
+                            result["_diagnostics"].setdefault("homework_backend", {})[key] = mode
                             break
 
-                if not homework["Table"]:
-                    nonempty = [
-                        f"{label}={_payload_diagnostic(payload)}"
-                        for label, payload in homework_payloads
-                        if _payload_has_content(payload)
-                    ]
-                    code = (
-                        "HOMEWORK_UNRECOGNISED_SHAPE"
-                        if nonempty
-                        else "HOMEWORK_EMPTY_RESPONSE"
-                    )
+                    if not homework["Table"]:
+                        for mode in fallback_order:
+                            if mode == "assignments":
+                                attempts = await client.async_get_homework_assignments_candidates(
+                                    student_id, today
+                                )
+                            else:
+                                attempts = await client.async_get_homework_behaviour_candidates(
+                                    student_id, today
+                                )
+
+                            for label, status, payload in attempts:
+                                homework_attempts.append(
+                                    f"{label}:{status}:{_payload_shape(payload)}"
+                                )
+                                if _payload_has_content(payload):
+                                    homework_payloads.append((label, payload))
+                                    candidate = _normalise_homework(payload)
+                                    if candidate["Table"]:
+                                        homework = candidate
+                                        result["_diagnostics"].setdefault("homework_backend", {})[key] = label
+                                        break
+                            if homework["Table"]:
+                                break
+
+                    if homework["Table"]:
+                        homework_supported = True
+                        self._homework_supported[key] = True
+                    else:
+                        nonempty = [
+                            f"{label}={_payload_diagnostic(payload)}"
+                            for label, payload in homework_payloads
+                            if _payload_has_content(payload)
+                        ]
+                        if nonempty:
+                            # The school exposes a homework module, but this DTO
+                            # is not recognised yet. Keep entities registered and
+                            # provide a safe diagnostic for parser support.
+                            homework_supported = True
+                            self._homework_supported[key] = True
+                            support = (
+                                f"MCAS-DIAG HOMEWORK_UNRECOGNISED_SHAPE | "
+                                f"version={INTEGRATION_VERSION} | "
+                                f"date={today.isoformat()} | "
+                                f"extended_mode={extended_mode} | "
+                                f"assignments_enabled={assignments_enabled} | "
+                                f"attempts=[{';'.join(homework_attempts)}] | "
+                                f"structures=[{' || '.join(nonempty[:3])}]"
+                            )
+                            warnings.append(support)
+                            _LOGGER.warning(
+                                "Please send this to the developer: %s",
+                                support,
+                            )
+                        else:
+                            # All known homework backends are empty/not enabled.
+                            # Treat homework as unsupported for this runtime and
+                            # stop probing the endpoints on subsequent refreshes.
+                            homework_supported = False
+                            self._homework_supported[key] = False
+                            _LOGGER.debug(
+                                "MCAS homework is not exposed for child %s; "
+                                "homework polling disabled until integration reload",
+                                key,
+                            )
+                else:
+                    homework_supported = False
+
+                payment_attempts = await client.async_get_payment_candidates(student_id)
+                payments = _normalise_payments(payment_attempts, student_id)
+                payment_attempt_summary = [
+                    f"{label}:{status}:{_payload_shape(payload)}"
+                    for label, status, payload in payment_attempts
+                ]
+                payment_nonempty = [
+                    f"{label}={_payload_diagnostic(payload)}"
+                    for label, status, payload in payment_attempts
+                    if status == 200 and _payload_has_content(payload)
+                ]
+                if payment_nonempty and not any(
+                    payments[name] for name in ("orders", "balances", "installments")
+                ):
                     support = (
-                        f"MCAS-DIAG {code} | version={INTEGRATION_VERSION} | "
-                        f"date={today.isoformat()} | "
-                        f"extended_mode={extended_mode} | "
-                        f"assignments_enabled={assignments_enabled} | "
-                        f"attempts=[{';'.join(homework_attempts)}]"
+                        f"MCAS-DIAG PAYMENTS_UNRECOGNISED_SHAPE | "
+                        f"version={INTEGRATION_VERSION} | "
+                        f"attempts=[{';'.join(payment_attempt_summary)}] | "
+                        f"structures=[{' || '.join(payment_nonempty[:4])}]"
                     )
-                    if nonempty:
-                        support += " | structures=[" + " || ".join(nonempty[:3]) + "]"
                     warnings.append(support)
-                    _LOGGER.warning(
-                        "Please send this to the developer: %s",
-                        support,
-                    )
+                    _LOGGER.warning("Please send this to the developer: %s", support)
 
                 result["children"][key] = {
                     "profile": child,
@@ -493,6 +661,8 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "year_id": year_id,
                     "attendance": attendance,
                     "homework": homework,
+                    "features": {"homework": bool(homework_supported)},
+                    "payments": payments,
                     "behaviour": behaviour,
                     "behaviour_chronological": behaviour_chronological,
                 }
