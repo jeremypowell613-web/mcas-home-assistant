@@ -28,7 +28,11 @@ ACADEMIC_CALENDAR_PATH = "/api/v1/calendars/mcas/academiccalendar"
 ATTENDANCE_PATH = "/api/v1/attendance/mcas/details/{student_id}/{year_id}/-1"
 HOMEWORK_PATH = "/api/v1/mcas/homework/extendeddetails/{student_id}/{day}/{month}/{year}"
 HOMEWORK_ASSIGNMENTS_PATH = "/api/v1/mcas/assignments"
-HOMEWORK_BEHAVIOUR_PATH = "/api/v1/mcas/homework/behaviour"\nPAYMENTS_OUTSTANDING_PATH = "/api/v1/mcas/payments/FindOutstandingPayments"\nPAYMENTS_BALANCES_PATH = "/api/v1/mcas/payments/FindOutstandingBalances"\nPAYMENTS_INSTALLMENTS_PATH = "/api/v1/mcas/payments/findProductsAndPaymentInstalments"\nPAYMENTS_STUDENT_BALANCES_PATH = "/api/v1/mcas/payments/getBalancesForStudents"
+HOMEWORK_BEHAVIOUR_PATH = "/api/v1/mcas/homework/behaviour"
+PAYMENTS_OUTSTANDING_PATH = "/api/v1/mcas/payments/FindOutstandingPayments"
+PAYMENTS_BALANCES_PATH = "/api/v1/mcas/payments/FindOutstandingBalances"
+PAYMENTS_INSTALLMENTS_PATH = "/api/v1/mcas/payments/findProductsAndPaymentInstalments"
+PAYMENTS_STUDENT_BALANCES_PATH = "/api/v1/mcas/payments/getBalancesForStudents"
 SCHOOL_CONFIG_PATH = "/api/v1/school/config"
 SCHOOL_CONFIG_KEYS = (
     "MCASHomeworkModuleHomeworkModeIsExtended",
