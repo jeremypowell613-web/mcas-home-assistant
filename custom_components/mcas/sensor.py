@@ -48,9 +48,6 @@ async def async_setup_entry(
                 MCASNextSchoolStartSensor(coordinator, entry, child_key, profile),
                 MCASNextSchoolDaySensor(coordinator, entry, child_key, profile),
                 MCASAttendanceSensor(coordinator, entry, child_key, profile),
-                MCASHomeworkOutstandingSensor(coordinator, entry, child_key, profile),
-                MCASNextHomeworkDueSensor(coordinator, entry, child_key, profile),
-                MCASNextHomeworkTitleSensor(coordinator, entry, child_key, profile),
                 MCASOutstandingPaymentsSensor(coordinator, entry, child_key, profile),
                 MCASOutstandingBalanceSensor(coordinator, entry, child_key, profile),
                 MCASNextPaymentDueSensor(coordinator, entry, child_key, profile),
@@ -58,6 +55,14 @@ async def async_setup_entry(
                 MCASLatestBehaviourSensor(coordinator, entry, child_key, profile),
             ]
         )
+        if child_data.get("features", {}).get("homework", True):
+            entities.extend(
+                [
+                    MCASHomeworkOutstandingSensor(coordinator, entry, child_key, profile),
+                    MCASNextHomeworkDueSensor(coordinator, entry, child_key, profile),
+                    MCASNextHomeworkTitleSensor(coordinator, entry, child_key, profile),
+                ]
+            )
     async_add_entities(entities)
 
 
