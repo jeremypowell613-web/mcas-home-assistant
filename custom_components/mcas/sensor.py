@@ -50,6 +50,8 @@ async def async_setup_entry(
                 MCASAttendanceSensor(coordinator, entry, child_key, profile),
                 MCASOutstandingPaymentsSensor(coordinator, entry, child_key, profile),
                 MCASOutstandingBalanceSensor(coordinator, entry, child_key, profile),
+                MCASDinnerBalanceSensor(coordinator, entry, child_key, profile),
+                MCASClubBalanceSensor(coordinator, entry, child_key, profile),
                 MCASNextPaymentDueSensor(coordinator, entry, child_key, profile),
                 MCASBehaviourPointsSensor(coordinator, entry, child_key, profile),
                 MCASLatestBehaviourSensor(coordinator, entry, child_key, profile),
@@ -487,6 +489,66 @@ class MCASOutstandingBalanceSensor(MCASSensorBase):
             and (amount := _money(item.get("outstanding"))) is not None
         ]
         return round(sum(values), 2) if values else 0.0
+
+
+class MCASDinnerBalanceSensor(MCASSensorBase):
+    _attr_name = "Dinner balance"
+    _attr_icon = "mdi:food"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "GBP"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "dinner_balance")
+
+    @property
+    def native_value(self):
+        payments = _payment_data(self.coordinator.data, self.child_key)
+        values = [
+            amount
+            for item in payments.get("student_balances", [])
+            if isinstance(item, dict)
+            and (amount := _money(item.get("dinner_balance"))) is not None
+        ]
+        return round(sum(values), 2) if values else None
+
+
+class MCASClubBalanceSensor(MCASSensorBase):
+    _attr_name = "Club balance"
+    _attr_icon = "mdi:account-group"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "GBP"
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "club_balance")
+
+    @property
+    def native_value(self):
+        payments = _payment_data(self.coordinator.data, self.child_key)
+        values = [
+            amount
+            for item in payments.get("student_balances", [])
+            if isinstance(item, dict)
+            and (amount := _money(item.get("club_balance"))) is not None
+        ]
+        return round(sum(values), 2) if values else None
+
+    @property
+    def extra_state_attributes(self):
+        payments = _payment_data(self.coordinator.data, self.child_key)
+        clubs = []
+        for item in payments.get("student_balances", []):
+            if not isinstance(item, dict):
+                continue
+            detail = {}
+            if item.get("club_id") is not None:
+                detail["club_id"] = item.get("club_id")
+            if item.get("club_name"):
+                detail["club_name"] = item.get("club_name")
+            if item.get("club_balance") is not None:
+                detail["balance"] = item.get("club_balance")
+            if detail:
+                clubs.append(detail)
+        return {"clubs": clubs[:10]}
 
 
 class MCASNextPaymentDueSensor(MCASSensorBase):

@@ -206,6 +206,7 @@ def _normalise_payments(
     orders: list[dict[str, Any]] = []
     balances: list[dict[str, Any]] = []
     installments: list[dict[str, Any]] = []
+    student_balances: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
 
     def add(kind: str, item: dict[str, Any]) -> None:
@@ -243,6 +244,23 @@ def _normalise_payments(
                 canonical["outstanding"],
             )
             target = balances
+        elif kind == "student_balance":
+            canonical = {
+                "student_id": _pick(item, "StudentID", "StudentId"),
+                "club_id": _pick(item, "ClubID", "ClubId"),
+                "club_name": _pick(item, "ClubName"),
+                "club_balance": _pick(item, "ClubBalance"),
+                "dinner_balance": _pick(item, "DinnerBalance"),
+            }
+            marker = (
+                kind,
+                canonical["student_id"],
+                canonical["club_id"],
+                canonical["club_name"],
+                canonical["club_balance"],
+                canonical["dinner_balance"],
+            )
+            target = student_balances
         else:
             canonical = {
                 "payment_instalment_id": _pick(
@@ -291,6 +309,8 @@ def _normalise_payments(
                 add("order", value)
             if "totaloutstanding" in keys and keys & {"totalcost", "paymentreceived", "clubid"}:
                 add("balance", value)
+            if "studentid" in keys and keys & {"clubbalance", "dinnerbalance"}:
+                add("student_balance", value)
             if (
                 "paymentinstalmentid" in keys
                 or "paymentinstallmentid" in keys
@@ -311,6 +331,7 @@ def _normalise_payments(
         "orders": orders,
         "balances": balances,
         "installments": installments,
+        "student_balances": student_balances,
     }
 
 
@@ -643,7 +664,8 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if status == 200 and _payload_has_content(payload)
                 ]
                 if payment_nonempty and not any(
-                    payments[name] for name in ("orders", "balances", "installments")
+                    payments[name]
+                    for name in ("orders", "balances", "installments", "student_balances")
                 ):
                     support = (
                         f"MCAS-DIAG PAYMENTS_UNRECOGNISED_SHAPE | "
