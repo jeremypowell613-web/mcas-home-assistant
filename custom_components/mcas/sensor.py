@@ -47,6 +47,7 @@ async def async_setup_entry(
                 MCASSchoolFinishSensor(coordinator, entry, child_key, profile),
                 MCASNextSchoolStartSensor(coordinator, entry, child_key, profile),
                 MCASNextSchoolDaySensor(coordinator, entry, child_key, profile),
+                MCASNextSchoolDayAfterTodaySensor(coordinator, entry, child_key, profile),
                 MCASAttendanceSensor(coordinator, entry, child_key, profile),
                 MCASOutstandingPaymentsSensor(coordinator, entry, child_key, profile),
                 MCASOutstandingBalanceSensor(coordinator, entry, child_key, profile),
@@ -306,6 +307,26 @@ class MCASNextSchoolDaySensor(MCASSensorBase):
             if day is None or not is_school_day(item) or day < today:
                 continue
             if day == today and today_finished:
+                continue
+            candidates.append(day)
+        return min(candidates) if candidates else None
+
+
+class MCASNextSchoolDayAfterTodaySensor(MCASSensorBase):
+    _attr_name = "Next school day after today"
+    _attr_icon = "mdi:calendar-arrow-right"
+    _attr_device_class = SensorDeviceClass.DATE
+
+    def __init__(self, coordinator, entry, child_key, profile):
+        super().__init__(coordinator, entry, child_key, profile, "next_school_day_after_today")
+
+    @property
+    def native_value(self) -> date | None:
+        today = dt_util.now().date()
+        candidates: list[date] = []
+        for item in academic_days(self.coordinator.data, self.child_key):
+            day = parse_day(item.get("Day"))
+            if day is None or day <= today or not is_school_day(item):
                 continue
             candidates.append(day)
         return min(candidates) if candidates else None
