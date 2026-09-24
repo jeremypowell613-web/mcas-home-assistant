@@ -134,8 +134,6 @@ class MCASAcademicCalendar(MCASCalendarBase):
                 continue
             status = str(item.get("DayStatusDescription") or "")
             code = str(item.get("DayStatusCode") or "")
-            if status == "Normal Day" and not item.get("HasDiaryEvents"):
-                continue
             summary = status or "School calendar event"
             if item.get("HasDiaryEvents") and status == "Normal Day":
                 summary = "School diary event"
