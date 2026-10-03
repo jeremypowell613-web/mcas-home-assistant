@@ -42,10 +42,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "Manage MCAS children",
+        "title": "Manage MCAS children and Configuration",
         "description": "{health_summary}\\n\\nARCADIA has refreshed the children linked to this parent account. Choose which children Home Assistant should expose.",
         "data": {
-          "selected_children": "Integrated children"
+          "selected_children": "Integrated children",
+          "timetable_weeks_history": "Number of weeks of historical timetable data to obtain",
+          "timetable_weeks_future": "Number of weeks of future timetable data to obtain"
         }
       }
     },

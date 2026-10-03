@@ -18,7 +18,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import MCASApiError, MCASAuthError, MCASClient
-from .const import CONF_CHILDREN, CONF_PASSWORD, CONF_SELECTED_CHILDREN, CONF_USERNAME, DOMAIN
+from .const import CONF_CHILDREN, CONF_PASSWORD, CONF_SELECTED_CHILDREN, CONF_USERNAME, DOMAIN, CONF_TIMETABLE_HISTORY_WEEKS, CONF_TIMETABLE_FUTURE_WEEKS, DEFAULT_TIMETABLE_HISTORY_WEEKS, DEFAULT_TIMETABLE_FUTURE_WEEKS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -180,6 +180,8 @@ class MCASConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._credentials: dict[str, str] = {}
         self._children: list[dict[str, str]] = []
+        self._timetable_history_weeks: int = DEFAULT_TIMETABLE_HISTORY_WEEKS
+        self._timetable_future_weeks: int = DEFAULT_TIMETABLE_FUTURE_WEEKS
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors = {}
@@ -364,6 +366,9 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
             stored_children, stored_selected, children
         )
 
+        time_table_history_weeks = self.config_entry.data.get(CONF_TIMETABLE_HISTORY_WEEKS, DEFAULT_TIMETABLE_HISTORY_WEEKS)
+        time_table_future_weeks = self.config_entry.data.get(CONF_TIMETABLE_FUTURE_WEEKS, DEFAULT_TIMETABLE_FUTURE_WEEKS)
+
         choices = [
             selector.SelectOptionDict(
                 value=_child_key(c), label=f"{c['name']} — {c['school_name']}"
@@ -372,6 +377,8 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
         ]
         if user_input is not None:
             new_selected = list(user_input.get(CONF_SELECTED_CHILDREN, []))
+            time_table_history_weeks = int(user_input.get(CONF_TIMETABLE_HISTORY_WEEKS, DEFAULT_TIMETABLE_HISTORY_WEEKS))
+            time_table_future_weeks = int(user_input.get(CONF_TIMETABLE_FUTURE_WEEKS, DEFAULT_TIMETABLE_FUTURE_WEEKS))
             if not new_selected:
                 return self.async_show_form(
                     step_id="init",
@@ -383,6 +390,26 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
                             ): selector.SelectSelector(
                                 selector.SelectSelectorConfig(
                                     options=choices, multiple=True
+                                )
+                            ),
+                            vol.Required(
+                                CONF_TIMETABLE_HISTORY_WEEKS, default=time_table_history_weeks
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(
+                                    min=0,
+                                    max=5,
+                                    step=1,
+                                    mode=selector.NumberSelectorMode.SLIDER
+                                )
+                            ),
+                            vol.Required(
+                                CONF_TIMETABLE_FUTURE_WEEKS, default=time_table_future_weeks
+                            ): selector.NumberSelector(
+                                selector.NumberSelectorConfig(
+                                    min=0,
+                                    max=5,
+                                    step=1,
+                                    mode=selector.NumberSelectorMode.SLIDER
                                 )
                             )
                         }
@@ -400,7 +427,10 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
             )
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
-                data={**self.config_entry.data, CONF_CHILDREN: children},
+                data={**self.config_entry.data,
+                    CONF_CHILDREN: children,
+                    CONF_TIMETABLE_HISTORY_WEEKS: time_table_history_weeks,
+                    CONF_TIMETABLE_FUTURE_WEEKS: time_table_future_weeks},
             )
             return self.async_create_entry(title="", data=user_input)
         return self.async_show_form(
@@ -413,6 +443,26 @@ class MCASOptionsFlow(config_entries.OptionsFlow):
                     ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=choices, multiple=True
+                        )
+                    ),
+                    vol.Required(
+                        CONF_TIMETABLE_HISTORY_WEEKS, default=time_table_history_weeks
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=5,
+                            step=1,
+                            mode=selector.NumberSelectorMode.SLIDER
+                        )
+                    ),
+                    vol.Required(
+                        CONF_TIMETABLE_FUTURE_WEEKS, default=time_table_future_weeks
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=5,
+                            step=1,
+                            mode=selector.NumberSelectorMode.SLIDER
                         )
                     )
                 }
