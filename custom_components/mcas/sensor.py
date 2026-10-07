@@ -621,25 +621,74 @@ class MCASBehaviourPointsSensor(MCASSensorBase):
         rows = _child_payload(self.coordinator.data, self.child_key, "behaviour").get("Table4", [])
         return rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
 
+    def _current_year_points(self):
+        """Calculate positive, negative and net points from current-year events."""
+        rows = _child_payload(
+            self.coordinator.data, self.child_key, "behaviour_chronological"
+        ).get("StudentEventsList", [])
+        if not isinstance(rows, list):
+            return None
+
+        positive = 0.0
+        negative = 0.0
+        found = False
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("Adjustment")
+            if raw in (None, "") or isinstance(raw, bool):
+                continue
+            try:
+                value = float(str(raw).replace(",", "").strip())
+            except (TypeError, ValueError):
+                continue
+
+            found = True
+            if value >= 0:
+                positive += value
+            else:
+                negative += abs(value)
+
+        if not found:
+            return None
+
+        def clean(value: float):
+            return int(value) if value.is_integer() else round(value, 2)
+
+        return clean(positive), clean(negative), clean(positive - negative)
+
     @property
     def native_value(self):
-        summary = self._summary()
-        if not summary:
-            return None
-        try:
-            return int(summary.get("ShowTotalPointsAllTime"))
-        except (TypeError, ValueError):
-            return summary.get("ShowTotalPointsAllTime")
+        points = self._current_year_points()
+        return None if points is None else points[0]
 
     @property
     def extra_state_attributes(self):
         summary = self._summary()
-        if not summary:
-            return {}
-        return {
-            "positive_points_all_time": summary.get("PositivePointsAllTime"),
-            "negative_points_all_time": summary.get("NegativePointsAllTime"),
-        }
+        points = self._current_year_points()
+        attrs = {}
+        if points is not None:
+            positive, negative, net = points
+            attrs.update(
+                {
+                    "positive_points_this_academic_year": positive,
+                    "negative_points_this_academic_year": negative,
+                    "net_points_this_academic_year": net,
+                }
+            )
+
+        child_data = self.coordinator.data.get("children", {}).get(self.child_key, {})
+        if isinstance(child_data, dict) and child_data.get("year_id") is not None:
+            attrs["academic_year_id"] = child_data.get("year_id")
+
+        if summary:
+            attrs.update(
+                {
+                    "positive_points_all_time": summary.get("PositivePointsAllTime"),
+                    "negative_points_all_time": summary.get("NegativePointsAllTime"),
+                }
+            )
+        return attrs
 
 
 class MCASLatestBehaviourSensor(MCASSensorBase):
