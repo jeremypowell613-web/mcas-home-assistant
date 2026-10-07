@@ -1,12 +1,14 @@
 {
   "domain": "mcas",
   "name": "ARCADIA Integrate MCAS",
-  "codeowners": ["@jeremypowell613-web"],
+  "codeowners": [
+    "@jeremypowell613-web"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/jeremypowell613-web/mcas-home-assistant",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/jeremypowell613-web/mcas-home-assistant/issues",
   "requirements": [],
-  "version": "2.3.2"
+  "version": "2.3.3"
 }
