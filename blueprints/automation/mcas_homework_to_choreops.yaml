@@ -1,0 +1,200 @@
+blueprint:
+  name: MCAS Homework to ChoreOps Sync
+  author: Steven D
+  description: |-
+    This blueprint can be used to synchronise the list of homework assignments on MCAS with indivudial chores on ChoreOps.
+
+    The list from the MCAS integration is compared against the existing list of homework related chores that belong to the
+    **Chore Label** category each time the sensor updates. Note that **Chore Label** must be a label that is only used with
+    instances of this blueprint, otherwise it will incorrectly claim existing chores with that label. **Chore Label** can be
+    shared by multiple children.
+
+    When an item is found in the MCAS list that does not appear in the existing list of chores, it is assumed that this is
+    a new assignment and a new chore is created.
+
+    When an item is in the current list of chores, but a corresponding entry is not in the list from MCAS then it is assumed
+    that the chore has been marked as completed by the school / child elsewhere. In this case the existing chore is claimed.
+
+    Lastly any completed homework chores are deleted after **Delete Competed After** days.
+
+    The label assigned to homework chores is specified using the **Chore Label** option.
+
+    The format for the name of the chore can be specified with the **Chore Name Format** option. This has a few placeholders:
+
+    - `[TITLE]` - The title of the assignment as provided by MCAS
+    - `[DUE_DATE]` - The date the assignment is due as provided by MCAS
+    - `[CHILD_NAME]` - Name of your child as provided by ChoreOps
+    - `[CHILD_INITIAL]` - First letter of your child's name, as provided by ChoreOps
+
+    It is recommended (but not required) that multiple options are used, especially when you have multiple children, or
+    your child's teacher tends to use generic titles, such as homework. This is needed as ChoreOps requires a unique name per
+    chore.
+
+    If you wish to change either **Chore Label** after having used this blueprint then you will need to manually delete the
+    existing homework chores that have previously been created as this blueprint will no longer be able to find them.
+
+    If you wish to change **Chore Name Format** after having used this blueprint then all existing chores are likely to be
+    claimed. They will then be automatically deleted after **Delete Competed After** days once they have been approved.
+
+  domain: automation
+  input:
+    mcas_homework_eid:
+      name: MCAS Homework Outstanding Homework
+      description: The entity ID of the outstanding homework sensor for the child you wish to synchronise.
+      selector:
+        entity:
+          filter:
+            - integration: mcas
+              domain: sensor
+    choreops_dashboard_helper_eid:
+      name: ChoreOps Dashboard Helper
+      description: The entity ID of the ChoreOps UI Dashboard Helper for the child you wish to synchronise.
+      selector:
+        entity:
+          filter:
+            - integration: choreops
+              domain: sensor
+    chore_name_format:
+      name: Chore Name Format
+      description: |-
+        Format to use for the chore name when creating the chore. Has a number of placeholders that can be used:
+
+        - `[TITLE]` - The title of the assignment as provided by MCAS
+        - `[DUE_DATE]` - The date the assignment is due as provided by MCAS
+        - `[CHILD_NAME]` - Name of your child as provided by ChoreOps
+        - `[CHILD_INITIAL]` - First letter of your child's name, as provided by ChoreOps
+      default: 'Homework: [TITLE] ([DUE_DATE]) ([CHILD_INITIAL])'
+      selector:
+        text:
+    chore_label:
+      name: Chore Label
+      description: The label to apply to homework chores that are to be synchronised.
+      default: 'Homework'
+      selector:
+        text:
+    chore_icon:
+      name: Chore Icon
+      description: The icon to apply to homework chores that are to be synchronised.
+      default: 'mdi:school'
+      selector:
+        icon:
+    chore_points:
+      name: Points
+      description: Number of points to award on completion of the chore.
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 250
+    delete_completed_after_days:
+      name: Delete Competed After
+      description: Number of days to wait before deleting completed assignments.
+      default: 7
+      selector:
+        number:
+          min: 1
+          max: 14
+
+variables:
+  mcas_homework_eid: !input mcas_homework_eid
+  choreops_dashboard_helper_eid: !input choreops_dashboard_helper_eid
+  chore_icon: !input chore_icon
+  chore_points: !input chore_points
+  chore_label: !input chore_label
+  delete_completed_after_days: !input delete_completed_after_days
+  chore_name_format: !input chore_name_format
+
+
+triggers:
+  - trigger: state
+    entity_id: !input mcas_homework_eid
+conditions:
+  - alias: Do not run, unless the sensor has a valid value
+    condition: template
+    value_template: |-
+      {{ has_value(mcas_homework_eid) }}
+actions:
+  - variables:
+      child_name: "{{ state_attr(choreops_dashboard_helper_eid, 'user_name') }}"
+      mcas_items_with_formatted_title: |-
+        {% set results=namespace(items=[]) %}
+        {% for item in state_attr(mcas_homework_eid, 'items') %}
+          {% set t=namespace(title=chore_name_format) %}
+          {% set due_date = strptime(item.due,"%d/%m/%Y %H:%M:%S") %}
+          {% set t.title = t.title | replace('[TITLE]', item.title) %}
+          {% set t.title = t.title | replace('[DUE_DATE]', due_date.strftime("%d/%m/%Y")) %}
+          {% set t.title = t.title | replace('[CHILD_NAME]', child_name) %}
+          {% set t.title = t.title | replace('[CHILD_INITIAL]', child_name[0]) %}
+          {% set results.items = results.items + [{'title': item.title, 'formatted_title': t.title, 'due': due_date.strftime("%Y-%m-%d %H:%M:%S")}] %}
+        {% endfor %}
+        {{ results.items }}
+      existing_homework_chores: |-
+        {% set mcas_item_names = mcas_items_with_formatted_title | map(attribute='formatted_title') | list %}
+        {% set results=namespace(chore=[]) %}
+        {% set chore_list_eids = [choreops_dashboard_helper_eid] + state_attr(choreops_dashboard_helper_eid, 'dashboard_helpers')['chore_helper_eids'] %}
+        {% for chore_list_eid in chore_list_eids %}
+          {% for chore in state_attr(chore_list_eid, 'chores') %}
+            {% if chore_label in (chore['labels'] | map(attribute='name')) %}
+              {% set eid = chore['eid'] %}
+              {% set t = {
+                 'eid': eid,
+                 'name': chore['name'],
+                 'labels': chore['labels'],
+                 'state': states(eid),
+                 'due_date': state_attr(eid, 'due_date'),
+                 'completed_date': state_attr(eid, 'last_completed'),
+                 'mark_complete': states(eid) in ['pending','due','overdue'] and not chore['name'] in mcas_item_names,
+                 'delete': false if states(eid) != 'completed' else now() | as_datetime > (state_attr(eid, 'last_completed') | as_datetime + timedelta(days=delete_completed_after_days)),
+              } %}
+              {% set results.chore = results.chore + [t] %}
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+        {{ results.chore }}
+      chores_to_create: |-
+        {% set existing_homework_chore_names = existing_homework_chores | map(attribute='name') | list %}
+        {{ mcas_items_with_formatted_title | rejectattr('formatted_title', 'in', existing_homework_chore_names) | list }}
+      chores_to_mark_completed: |-
+        {{ existing_homework_chores | selectattr('mark_complete', 'eq', true) | list }}
+      chores_to_delete: |-
+        {{ existing_homework_chores | selectattr('delete', 'eq', true) | list }}
+
+  - alias: Create New Assignments
+    repeat:
+      for_each: '{{ chores_to_create }}'
+      sequence:
+        - action: choreops.create_chore
+          data:
+            name: '{{ repeat.item.formatted_title }}'
+            assigned_user_names:
+              - '{{ child_name }}'
+            points: '{{ chore_points }}'
+            icon: '{{ chore_icon }}'
+            labels:
+              - '{{ chore_label }}'
+            frequency: none
+            completion_criteria: independent
+            approval_reset_type: manual
+            due_date: '{{ repeat.item.due }}'
+  - alias: Mark Assignments Completed
+    repeat:
+      for_each: '{{ chores_to_mark_completed }}'
+      sequence:
+        - variables:
+            eid: '{{ repeat.item.eid }}'
+        - action: button.press
+          metadata: {}
+          target:
+            entity_id: |-
+              {{ state_attr(eid, 'claim_button_eid') }}
+          data: {}
+  - alias: Delete Old Assignments
+    repeat:
+      for_each: '{{ chores_to_delete }}'
+      sequence:
+      - action: choreops.delete_chore
+        data:
+          name: '{{ repeat.item.name }}'
+
+mode: queued
+max: 10
