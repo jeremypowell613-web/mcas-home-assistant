@@ -56,6 +56,11 @@ CONF_CONTACT_ID = "contact_id"
 CONF_STUDENT_ID = "student_id"
 CONF_NAME = "name"
 CONF_SCHOOL_NAME = "school_name"
+CONF_TIMETABLE_HISTORY_WEEKS = "timetable_weeks_history"
+CONF_TIMETABLE_FUTURE_WEEKS = "timetable_weeks_future"
+
+DEFAULT_TIMETABLE_HISTORY_WEEKS = 0
+DEFAULT_TIMETABLE_FUTURE_WEEKS = 1
 
 DEFAULT_UPDATE_INTERVAL = timedelta(minutes=30)
 USER_AGENT = "HomeAssistant-Arcadia-MCAS/2.3.3"

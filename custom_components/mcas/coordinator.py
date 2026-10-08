@@ -16,7 +16,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import MCASApiError, MCASAuthError, MCASClient
-from .const import CONF_CHILDREN, CONF_SELECTED_CHILDREN, DEFAULT_UPDATE_INTERVAL, DOMAIN, INTEGRATION_VERSION
+from .const import CONF_CHILDREN, CONF_SELECTED_CHILDREN, DEFAULT_UPDATE_INTERVAL, DOMAIN, INTEGRATION_VERSION, CONF_TIMETABLE_HISTORY_WEEKS, CONF_TIMETABLE_FUTURE_WEEKS, DEFAULT_TIMETABLE_HISTORY_WEEKS, DEFAULT_TIMETABLE_FUTURE_WEEKS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -514,12 +514,26 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     calendars[pair] = await client.async_get_academic_calendar()
 
                 student_id = str(child["student_id"])
-                current_payload = await client.async_get_timetable(student_id, this_week)
-                next_payload = await _optional(
-                    "next-week timetable",
-                    client.async_get_timetable(student_id, next_week),
-                    warnings,
-                )
+
+                timetables = [await client.async_get_timetable(student_id, this_week)]
+
+                for week_offset in range(self.entry.data.get(CONF_TIMETABLE_HISTORY_WEEKS, DEFAULT_TIMETABLE_HISTORY_WEEKS)):
+                    day_offset = 7 * (week_offset + 1)
+                    timetable_payload = await _optional(
+                        "historical timetable",
+                        client.async_get_timetable(student_id, this_week - timedelta(days=day_offset)),
+                        warnings,
+                    )
+                    timetables.append(timetable_payload)
+
+                for week_offset in range(self.entry.data.get(CONF_TIMETABLE_FUTURE_WEEKS, DEFAULT_TIMETABLE_FUTURE_WEEKS)):
+                    day_offset = 7 * (week_offset + 1)
+                    timetable_payload = await _optional(
+                        "future timetable",
+                        client.async_get_timetable(student_id, this_week + timedelta(days=day_offset)),
+                        warnings,
+                    )
+                    timetables.append(timetable_payload)
 
                 years = await _optional("school years", client.async_get_years(student_id), warnings)
                 year_id = _current_year_id(years)
@@ -678,7 +692,7 @@ class MCASDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 result["children"][key] = {
                     "profile": child,
-                    "timetable": _merge_timetables(current_payload, next_payload),
+                    "timetable": _merge_timetables(*timetables),
                     "academic_calendar": calendars[pair],
                     "year_id": year_id,
                     "attendance": attendance,
